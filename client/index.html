@@ -1,0 +1,75 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>Synergy Auto-Battler</title>
+    <link rel="stylesheet" href="style.css">
+</head>
+<body>
+    <div class="game-container">
+        
+        <header class="top-bar">
+            <div class="synergy-panel">
+                <p><strong>Strategist: (3/6)</strong></p>
+                <p><strong>Coder: (1/2)</strong></p>
+            </div>
+            <div class="round-info">
+                <span class="score">1</span>
+                <span class="timer">10/20</span>
+                <span class="score enemy">0</span>
+            </div>
+            <div class="synergy-panel enemy">
+                <p><strong>OutdoorPerson: (2/4)</strong></p>
+                <p><strong>Killer: (1/2)</strong></p>
+            </div>
+        </header>
+
+        <aside class="side-panel left-panel">
+            <div class="player-profile">
+                <img src="placeholder-avatar.png" alt="P1" class="avatar">
+                <h3>NeonVader</h3>
+                <div class="health-bar">
+                    <div class="health-fill" style="width: 100%;">100</div>
+                </div>
+            </div>
+            <div class="unit-list">
+                <p>Star-Vader (Coder)</p>
+                <p>RockStarDad (Trader)</p>
+            </div>
+        </aside>
+
+        <main class="board-container" id="phaser-game-canvas">
+            <p class="placeholder-text">[ Game Board Renders Here ]</p>
+        </main>
+
+        <aside class="side-panel right-panel">
+             <div class="player-profile">
+                <img src="placeholder-avatar2.png" alt="P2" class="avatar">
+                <h3>RebelGirl</h3>
+                <div class="health-bar">
+                    <div class="health-fill enemy" style="width: 100%;">100</div>
+                </div>
+            </div>
+        </aside>
+
+        <footer class="shop-container">
+            <div class="shop-header">
+                <span>Shop</span>
+                <button class="refresh-btn">🔄 Refresh (2g)</button>
+            </div>
+            <div class="shop-cards">
+                <div class="card coder-theme"><p>Star_Vader</p><p>3g</p></div>
+                <div class="card trader-theme"><p>RockStarDad</p><p>2g</p></div>
+                <div class="card killer-theme"><p>Binkly</p><p>4g</p></div>
+                <div class="card empty-slot"></div>
+                <div class="card empty-slot"></div>
+            </div>
+        </footer>
+
+    </div>
+    <script src="https://cdn.jsdelivr.net/npm/phaser@3.60.0/dist/phaser.min.js"></script>
+    <script src="../shared/dictionary.js"></script>
+    <script src="game.js"></script>
+</body>
+</html>

@@ -1,0 +1,195 @@
+/* Reset and Base Styles */
+* {
+    box-sizing: border-box;
+    margin: 0;
+    padding: 0;
+    font-family: 'Segoe UI', Tahoma, Geneva, Verdana, sans-serif;
+}
+
+body {
+    background-color: #121215;
+    color: #e0e0e0;
+    height: 100vh;
+    display: flex;
+    justify-content: center;
+    align-items: center;
+    overflow: hidden; /* Prevents scrollbars in the Discord Activity */
+}
+
+/* Main CSS Grid Layout */
+.game-container {
+    display: grid;
+    grid-template-columns: 250px 1fr 250px;
+    grid-template-rows: 80px 1fr 150px;
+    grid-template-areas: 
+        "header header header"
+        "left main right"
+        "footer footer footer";
+    width: 100vw;
+    height: 100vh;
+    gap: 10px;
+    padding: 10px;
+    background-color: #1a1a20;
+}
+
+/* Top Bar */
+.top-bar {
+    grid-area: header;
+    display: flex;
+    justify-content: space-between;
+    align-items: center;
+    background-color: #23232c;
+    border-radius: 8px;
+    padding: 0 20px;
+    border: 1px solid #333;
+}
+
+.round-info {
+    display: flex;
+    gap: 15px;
+    font-size: 1.2rem;
+    font-weight: bold;
+}
+
+.score { color: #4dabf7; }
+.score.enemy { color: #ff6b6b; }
+
+/* Side Panels */
+.side-panel {
+    background-color: #23232c;
+    border-radius: 8px;
+    padding: 15px;
+    border: 1px solid #333;
+}
+.left-panel { grid-area: left; }
+.right-panel { grid-area: right; }
+
+.player-profile {
+    text-align: center;
+    margin-bottom: 20px;
+}
+
+.avatar {
+    width: 80px;
+    height: 80px;
+    border-radius: 50%;
+    background-color: #444; /* Placeholder */
+    margin-bottom: 10px;
+}
+
+.health-bar {
+    width: 100%;
+    height: 15px;
+    background-color: #111;
+    border-radius: 10px;
+    overflow: hidden;
+    margin-top: 10px;
+}
+
+.health-fill {
+    background-color: #51cf66;
+    height: 100%;
+    font-size: 0.8rem;
+    color: #000;
+    line-height: 15px;
+}
+.health-fill.enemy { background-color: #ff6b6b; }
+
+/* The Game Board Container */
+.board-container {
+    grid-area: main;
+    background-color: #17171d;
+    border: 2px solid #333;
+    border-radius: 8px;
+    display: flex;
+    justify-content: center;
+    align-items: center;
+    position: relative;
+    box-shadow: inset 0 0 20px rgba(0,0,0,0.5);
+}
+
+.placeholder-text {
+    color: #555;
+    font-size: 1.5rem;
+}
+
+/* Shop Footer */
+.shop-container {
+    grid-area: footer;
+    background-color: #23232c;
+    border-radius: 8px;
+    padding: 10px;
+    border: 1px solid #333;
+    display: flex;
+    flex-direction: column;
+}
+
+.shop-header {
+    text-align: center;
+    font-weight: bold;
+    margin-bottom: 10px;
+}
+
+.shop-cards {
+    display: flex;
+    justify-content: center;
+    gap: 15px;
+    height: 100%;
+}
+
+.card {
+    background-color: #333;
+    width: 120px;
+    border-radius: 5px;
+    padding: 10px;
+    display: flex;
+    flex-direction: column;
+    justify-content: flex-end;
+    border: 2px solid #555;
+    cursor: pointer;
+    transition: transform 0.1s;
+}
+
+.card:hover {
+    transform: scale(1.05);
+}
+
+.coder-theme { border-color: #fcc419; }
+.trader-theme { border-color: #4dabf7; }
+
+
+.shop-header {
+    display: flex;
+    justify-content: space-between; /* Puts title on left, button on right */
+    align-items: center;
+    font-weight: bold;
+    margin-bottom: 10px;
+    padding: 0 10px;
+}
+
+.refresh-btn {
+    background-color: #2b2b36;
+    color: #e0e0e0;
+    border: 1px solid #555;
+    padding: 5px 15px;
+    border-radius: 4px;
+    cursor: pointer;
+    font-weight: bold;
+    transition: background-color 0.2s;
+}
+
+.refresh-btn:hover { background-color: #3b3b4a; }
+
+.shop-cards {
+    display: flex;
+    justify-content: space-between; /* Evenly spaces the 5 cards */
+    gap: 10px;
+    height: 100%;
+}
+
+.card.empty-slot {
+    background-color: #1a1a20;
+    border: 2px dashed #444;
+    cursor: default;
+}
+.card.empty-slot:hover { transform: none; }
