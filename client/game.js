@@ -54,8 +54,226 @@ function makeUnit(charId, isEnemy = false) {
         stars: 1,
         currentHp: charData.baseStats.hp,
         maxHp: charData.baseStats.hp,
+        abilityCharge: 0,
         isEnemy
     };
+}
+
+// Stats scale geometrically with star tier: 1★=1×, 2★=1.8×, 3★=3.24×.
+// Combat reads these instead of CHARACTERS[charId].baseStats so star upgrades
+// actually mean something. maxHp/currentHp are stored on the unit and updated
+// on merge so HP bars stay consistent.
+const STAR_STAT_MULT = 1.8;
+function starMultiplier(stars) {
+    return Math.pow(STAR_STAT_MULT, (stars | 0) - 1);
+}
+function getScaledStats(unit) {
+    const base = CHARACTERS[unit.charId].baseStats;
+    const m = starMultiplier(unit.stars);
+    return {
+        hp:           Math.floor(base.hp * m),
+        attack:       Math.floor(base.attack * m),
+        armor:        Math.floor(base.armor * m),
+        abilityPower: Math.floor(base.abilityPower * m)
+    };
+}
+
+// =============================================================================
+// SYNERGIES — tier evaluation + combat buff application
+// =============================================================================
+// activeSynergies() scans the player's board, counts each style + work, applies
+// the Leader master-synergy bonus (when Leader is itself active ≥2, every other
+// synergy gains +tier contributors for tier calculation only — not for display),
+// and returns { styles, works } maps with { count, effective, tier }.
+//
+// computeCombatStats() applies the matching tier buff to a unit's star-scaled
+// stats. The buff multiplier set (hp/atk/armor/ap) lives in SYNERGIES per tier.
+
+function tierFor(count, thresholds) {
+    for (let i = thresholds.length - 1; i >= 0; i--) {
+        if (count >= thresholds[i]) return i;
+    }
+    return -1; // not active
+}
+
+function activeSynergies() {
+    const styleCounts = {};
+    const workCounts  = {};
+    const seen = new Set();
+    state.board.forEach(row => row.forEach(u => {
+        if (!u || seen.has(u.charId)) return;
+        seen.add(u.charId);
+        const d = CHARACTERS[u.charId];
+        styleCounts[d.style] = (styleCounts[d.style] || 0) + 1;
+        d.work.forEach(w => workCounts[w] = (workCounts[w] || 0) + 1);
+    }));
+
+    const styles = {};
+    Object.keys(SYNERGIES.styles).forEach(s => {
+        const count = styleCounts[s] || 0;
+        if (count === 0) return;
+        styles[s] = { count, tier: tierFor(count, SYNERGIES.styles[s].thresholds) };
+    });
+
+    const works = {};
+    Object.keys(SYNERGIES.works).forEach(w => {
+        const count = workCounts[w] || 0;
+        if (count === 0) return;
+        works[w] = {
+            count,
+            tier: tierFor(count, SYNERGIES.works[w].thresholds),
+            global: !!SYNERGIES.works[w].global
+        };
+    });
+
+    return { styles, works };
+}
+
+// Run at the start of every planning phase. Trader buys you extra income;
+// Recruiter banks free shop rerolls you can spend instead of gold. Both are
+// driven by the current board's active synergy tiers.
+function applyRoundStartSynergyEconomy() {
+    const syn = activeSynergies();
+
+    const tr = syn.works.Trader;
+    if (tr && tr.tier >= 0) {
+        const econ = (SYNERGIES.works.Trader.economy || [])[tr.tier];
+        if (econ && econ.goldPerRound) {
+            state.addGold(econ.goldPerRound, 'trader-synergy');
+            flashMessage(`Trader +${econ.goldPerRound}g`);
+        }
+    }
+
+    const rc = syn.works.Recruiter;
+    state.freeRerolls = 0;
+    if (rc && rc.tier >= 0) {
+        const econ = (SYNERGIES.works.Recruiter.economy || [])[rc.tier];
+        if (econ && econ.extraReroll) state.freeRerolls = econ.extraReroll;
+    }
+    updateRefreshButton();
+}
+
+function updateRefreshButton() {
+    const btn = document.querySelector('.refresh-btn');
+    if (!btn) return;
+    btn.textContent = state.freeRerolls > 0
+        ? `🔄 Refresh (free ${state.freeRerolls})`
+        : `🔄 Refresh (2g)`;
+}
+
+function computeCombatStats(unit, syn) {
+    const data = CHARACTERS[unit.charId];
+    const s = getScaledStats(unit);
+    let hp = s.hp, atk = s.attack, armor = s.armor, ap = s.abilityPower;
+
+    const applyBuff = (buff) => {
+        if (!buff) return;
+        if (buff.hp)    hp    = Math.floor(hp    * buff.hp);
+        if (buff.atk)   atk   = Math.floor(atk   * buff.atk);
+        if (buff.armor) armor = Math.floor(armor * buff.armor);
+        if (buff.ap)    ap    = Math.floor(ap    * buff.ap);
+    };
+
+    // Style synergy — applies only to units of that style.
+    const styleSyn = syn.styles[data.style];
+    if (styleSyn && styleSyn.tier >= 0) {
+        applyBuff(SYNERGIES.styles[data.style].buffs[styleSyn.tier]);
+    }
+
+    // Work synergies — apply if the unit carries the tag,
+    // OR if the synergy is global (Leader = command aura: buffs everyone).
+    Object.keys(syn.works).forEach(w => {
+        const workSyn = syn.works[w];
+        if (workSyn.tier < 0) return;
+        const def = SYNERGIES.works[w];
+        const carriesTag = data.work.includes(w);
+        if (carriesTag || def.global) {
+            applyBuff(def.buffs[workSyn.tier]);
+        }
+    });
+
+    return { hp, attack: atk, armor, abilityPower: ap };
+}
+
+// =============================================================================
+// 3-STAR MERGE
+// =============================================================================
+// When the player owns 3 copies of the same charId at the same star tier
+// (across bench + their board), the trio fuses into a single unit one star
+// higher. Stats jump via getScaledStats; the star row redraws automatically.
+// Triggered after every buyUnit. Loops so 9× 1★ → 3★ in one cascade.
+
+function checkAndMerge() {
+    let cascaded = false;
+    let mergedThisPass;
+    do {
+        mergedThisPass = false;
+
+        // Index every player-owned unit by (charId, stars).
+        const groups = new Map();
+        const push = (u, loc) => {
+            if (!u || u.isEnemy || u.stars >= 3) return;
+            const k = u.charId + '@' + u.stars;
+            if (!groups.has(k)) groups.set(k, []);
+            groups.get(k).push({ unit: u, loc });
+        };
+        state.bench.forEach((u, slot) => push(u, { kind: 'bench', slot }));
+        for (let r = 0; r < BOARD.ROWS; r++) {
+            for (let c = 0; c < BOARD.COLS; c++) {
+                push(state.board[r][c], { kind: 'board', col: c, row: r, side: 'p1' });
+            }
+        }
+        for (const list of groups.values()) {
+            if (list.length >= 3) {
+                doMerge(list.slice(0, 3));
+                mergedThisPass = true;
+                cascaded = true;
+                break;  // restart scan with the new state
+            }
+        }
+    } while (mergedThisPass);
+    return cascaded;
+}
+
+function doMerge(triplet) {
+    // Survivor preference: pick a deployed unit so we don't accidentally pull
+    // a unit off the active board to merge into a bench slot.
+    triplet.sort((a, b) =>
+        (a.loc.kind === 'board' ? 0 : 1) - (b.loc.kind === 'board' ? 0 : 1)
+    );
+    const survivor = triplet[0];
+    const others   = triplet.slice(1);
+
+    survivor.unit.stars += 1;
+    const scaled = getScaledStats(survivor.unit);
+    survivor.unit.maxHp     = scaled.hp;
+    survivor.unit.currentHp = scaled.hp;
+
+    others.forEach(o => {
+        if (o.loc.kind === 'bench') state.benchTake(o.loc.slot);
+        else                         state.boardPlace(o.loc.col, o.loc.row, null);
+        const c = containers.get(o.unit.uid);
+        if (c) c.destroy();
+        containers.delete(o.unit.uid);
+    });
+
+    const survContainer = containers.get(survivor.unit.uid);
+    if (survContainer) {
+        updateStarRow(survContainer);
+        updateHpBar(survContainer);
+        // Brief pop so the upgrade is felt.
+        const baseScale = survContainer.scaleX;
+        phaserScene.tweens.add({
+            targets: survContainer,
+            scaleX: { from: baseScale * 1.45, to: baseScale },
+            scaleY: { from: baseScale * 1.45, to: baseScale },
+            duration: 380,
+            ease: 'Back.easeOut'
+        });
+    }
+
+    const stars = '★'.repeat(survivor.unit.stars);
+    flashMessage(`${CHARACTERS[survivor.unit.charId].displayName} → ${stars}`);
 }
 
 // Where is this uid currently? Returns {kind:'bench', slot} or {kind:'board', col, row} or null.
@@ -128,49 +346,65 @@ function create() {
     drawGrid(this, 'p1', 0x4dabf7);
     drawGrid(this, 'p2', 0xff6b6b);
     drawBench(this);
+    drawSellZone(this);
 
     installDragPipeline(this);
 }
 
 function drawGrid(scene, side, color) {
-    // Filled axis-aligned tiles with neon border + a pulsing inner glow.
-    // Each tile is its own rectangle so it reads as a discrete slot you can
-    // drop a card onto.
+    // Tilted-board tiles: each cell is the projected trapezium of an axis-
+    // aligned rectangle in canvas-local space. Three layers per side:
+    //   1. dark fill   → makes each tile a solid slot, not just an outline
+    //   2. neon border → identifies side (cyan = P1, red = P2)
+    //   3. inner glow  → pulses for a subtle "live battlefield" feel
     const o = side === 'p2' ? BOARD.P2 : BOARD.P1;
-    const inset = 3;
-    const radius = 6;
 
+    function insetQuad(c, r, pad) {
+        const x0 = o.x + c * BOARD.CELL + pad;
+        const y0 = o.y + r * BOARD.CELL + pad;
+        const x1 = x0 + BOARD.CELL - 2 * pad;
+        const y1 = y0 + BOARD.CELL - 2 * pad;
+        return [project(x0,y0), project(x1,y0), project(x1,y1), project(x0,y1)];
+    }
+    function tracePath(g, q) {
+        g.beginPath();
+        g.moveTo(q[0].x, q[0].y);
+        g.lineTo(q[1].x, q[1].y);
+        g.lineTo(q[2].x, q[2].y);
+        g.lineTo(q[3].x, q[3].y);
+        g.closePath();
+    }
+
+    // Dark fill
     const fill = scene.add.graphics();
     fill.setDepth(-12);
     fill.fillStyle(0x0a0a14, 0.55);
     for (let r = 0; r < BOARD.ROWS; r++) {
         for (let c = 0; c < BOARD.COLS; c++) {
-            const x = o.x + c * BOARD.CELL + inset;
-            const y = o.y + r * BOARD.CELL + inset;
-            fill.fillRoundedRect(x, y, BOARD.CELL - 2*inset, BOARD.CELL - 2*inset, radius);
+            tracePath(fill, insetQuad(c, r, 3));
+            fill.fillPath();
         }
     }
 
+    // Outer neon border
     const border = scene.add.graphics();
     border.setDepth(-11);
     border.lineStyle(2, color, 0.85);
     for (let r = 0; r < BOARD.ROWS; r++) {
         for (let c = 0; c < BOARD.COLS; c++) {
-            const x = o.x + c * BOARD.CELL + inset;
-            const y = o.y + r * BOARD.CELL + inset;
-            border.strokeRoundedRect(x, y, BOARD.CELL - 2*inset, BOARD.CELL - 2*inset, radius);
+            tracePath(border, insetQuad(c, r, 3));
+            border.strokePath();
         }
     }
 
-    // Pulsing inner glow ring
+    // Pulsing inner glow
     const glow = scene.add.graphics();
     glow.setDepth(-10);
     glow.lineStyle(1, color, 1);
     for (let r = 0; r < BOARD.ROWS; r++) {
         for (let c = 0; c < BOARD.COLS; c++) {
-            const x = o.x + c * BOARD.CELL + inset + 2;
-            const y = o.y + r * BOARD.CELL + inset + 2;
-            glow.strokeRoundedRect(x, y, BOARD.CELL - 2*inset - 4, BOARD.CELL - 2*inset - 4, radius - 2);
+            tracePath(glow, insetQuad(c, r, 6));
+            glow.strokePath();
         }
     }
     scene.tweens.add({
@@ -199,6 +433,28 @@ function drawBench(scene) {
     }
 }
 
+// Drop a unit here to sell it back for ECONOMY.SELL_REFUND[stars] × cost.
+const SELL_ZONE = { x: 10, y: 520, w: 100, h: 65 };
+let sellZoneArt = null;
+
+function drawSellZone(scene) {
+    const z = SELL_ZONE;
+    const g = scene.add.graphics();
+    g.fillStyle(0x551515, 0.45);
+    g.fillRoundedRect(z.x, z.y, z.w, z.h, 8);
+    g.lineStyle(2, 0xff4757, 0.85);
+    g.strokeRoundedRect(z.x, z.y, z.w, z.h, 8);
+    scene.add.text(z.x + z.w / 2, z.y + z.h / 2, '💰 SELL', {
+        fontSize: '16px', fontFamily: 'Arial', color: '#ff6b6b', fontStyle: 'bold'
+    }).setOrigin(0.5);
+    sellZoneArt = g;
+}
+
+function pointInSellZone(x, y) {
+    const z = SELL_ZONE;
+    return x >= z.x && x <= z.x + z.w && y >= z.y && y <= z.y + z.h;
+}
+
 // ===========================================================================
 // UNIT CONTAINERS  (Phase 2: portrait sprite + cost frame + star row + badge)
 // ===========================================================================
@@ -212,6 +468,28 @@ function drawBench(scene) {
 // up by name regardless of insertion order. Combat/drag only ever touches
 // these named refs — never `container.list[n]`.
 
+// ----- Card layout constants (vertical 50×80 rectangle) ---------------------
+//   Local-space y axis points DOWN. Origin is the card center.
+//   Top edge y = -40, bottom edge y = +40.
+//
+//     +---------------+
+//     |  === HP ====  |   y = -32   HP bar (always visible)
+//     |   [portrait]  |   y =  -5   portrait
+//     |   ⭐ ⭐ ⭐    |   y = +20   stars
+//     |  🧠  💻    ●  |   y = +30   style | work | active-badge
+//     +---------------+
+const CARD = {
+    W: 50,
+    H: 80,
+    PORTRAIT_SIZE: 40,
+    PORTRAIT_Y: -5,
+    HP_Y: -32,
+    STARS_Y: +20,
+    WORK_Y: +30,
+    STYLE_ICON_XY: { x: -16, y: +30 },    // bottom-left
+    BADGE_XY:      { x: +18, y: +30 }     // bottom-right (active synergy)
+};
+
 function buildPortraitChild(scene, unit) {
     // Returns the visual that represents the character. Uses the loaded
     // portrait texture when present, else a colored rectangle so the game
@@ -219,46 +497,46 @@ function buildPortraitChild(scene, unit) {
     const charData = CHARACTERS[unit.charId];
     const texKey = 'portrait_' + unit.charId;
     if (scene.textures.exists(texKey)) {
-        const img = scene.add.image(0, 0, texKey);
-        img.setDisplaySize(48, 48);
-        if (unit.isEnemy) img.setTint(0xff8888); // red wash for enemy
+        const img = scene.add.image(0, CARD.PORTRAIT_Y, texKey);
+        img.setDisplaySize(CARD.PORTRAIT_SIZE, CARD.PORTRAIT_SIZE);
+        if (unit.isEnemy) img.setTint(0xff8888);
         return img;
     }
-    // Fallback: rectangle + style icon + 3-letter name (the Phase 0 look)
-    const fill = unit.isEnemy ? 0x882222 : (STYLE_COLORS[charData.style] || 0xffffff);
-    const rect = scene.add.rectangle(0, 0, 48, 48, fill);
-    const styleIcon = SYMBOLS.styles[charData.style] || '';
-    const workIcons = charData.work.map(w => SYMBOLS.work[w] || '').join('');
-    const shortName = charData.displayName.substring(0, 3).toUpperCase();
-    const text = scene.add.text(0, 0, `${styleIcon}${workIcons}\n${shortName}`, {
-        fontSize: '11px', fontFamily: 'Arial', color: '#000000',
-        fontStyle: 'bold', align: 'center', lineSpacing: 2
+    // Fallback: filled rect + short name. The styled portrait will replace
+    // this once PNGs land in client/assets/portraits/.
+    const fill = unit.isEnemy ? 0x882222 : (STYLE_COLORS[charData.style] || 0x4dabf7);
+    const rect = scene.add.rectangle(0, CARD.PORTRAIT_Y, CARD.PORTRAIT_SIZE, CARD.PORTRAIT_SIZE, fill);
+    const shortName = charData.displayName.substring(0, 4).toUpperCase();
+    const text = scene.add.text(0, CARD.PORTRAIT_Y, shortName, {
+        fontSize: '10px', fontFamily: 'Arial', color: '#000000',
+        fontStyle: 'bold', align: 'center'
     }).setOrigin(0.5);
-    // Group rect+text into a sub-container so the caller has one child to manage.
     const group = scene.add.container(0, 0, [rect, text]);
     group.setData('fallbackRect', rect);
     return group;
 }
 
-function buildCostFrame(scene, cost, isEnemy) {
-    // Neon ring colored by cost tier (grey/green/blue/purple/gold).
-    // Enemies get a muted red frame for visual disambiguation.
+function buildCardFrame(scene, cost, isEnemy) {
+    // Vertical card frame: dark fill + neon cost-tier border + outer halo.
     const color = isEnemy ? 0x991e1e : (COST_COLORS[cost] || 0x666666);
     const g = scene.add.graphics();
-    // outer glow
-    g.lineStyle(4, color, 0.25);
-    g.strokeRect(-25, -25, 50, 50);
-    // sharp inner edge
-    g.lineStyle(2, color, 1);
-    g.strokeRect(-24, -24, 48, 48);
+    // Outer halo
+    g.lineStyle(4, color, 0.22);
+    g.strokeRoundedRect(-CARD.W/2 - 1, -CARD.H/2 - 1, CARD.W + 2, CARD.H + 2, 6);
+    // Dark fill
+    g.fillStyle(0x0e0e16, 0.92);
+    g.fillRoundedRect(-CARD.W/2, -CARD.H/2, CARD.W, CARD.H, 5);
+    // Sharp border
+    g.lineStyle(1.5, color, 1);
+    g.strokeRoundedRect(-CARD.W/2, -CARD.H/2, CARD.W, CARD.H, 5);
     return g;
 }
 
 function buildStarRow(scene, stars) {
-    // Tiny yellow stars at the bottom of the unit. `stars` is 1..3.
+    // Tiny yellow stars at the bottom strip of the card.
     const g = scene.add.graphics();
     drawStars(g, stars);
-    g.y = 25;
+    g.y = CARD.STARS_Y;
     return g;
 }
 
@@ -291,10 +569,11 @@ function drawStarShape(g, cx, cy, r) {
 }
 
 function buildSynergyBadge(scene) {
-    // Small colored dot in the top-right corner. Hidden by default;
-    // refreshSynergyBadges() turns it on for units with an active synergy.
+    // Small colored dot in the top-LEFT corner — lights up when any of the
+    // unit's style/work tags currently has an active synergy on the board.
     const g = scene.add.graphics();
-    g.x = 18; g.y = -18;
+    g.x = CARD.BADGE_XY.x;
+    g.y = CARD.BADGE_XY.y;
     g.setVisible(false);
     return g;
 }
@@ -308,22 +587,37 @@ function paintSynergyBadge(g, color) {
 }
 
 function createUnitContainer(scene, unit) {
-    // Phase 2: standing-card. The container is built at (0,0); positioning,
-    // depth-scaling and z-order are applied by placeUnitContainer() based on
-    // whether the unit is on the bench (upright) or on the projected board.
+    // Vertical card 50×80. Stacking order (back to front):
+    //   frame → portrait → HP bar → stars → work-icon row → style icon → badge
     const charData = CHARACTERS[unit.charId];
 
+    const frame    = buildCardFrame(scene, charData.cost, unit.isEnemy);
     const portrait = buildPortraitChild(scene, unit);
-    const frame    = buildCostFrame(scene, charData.cost, unit.isEnemy);
-    const hpBg     = scene.add.rectangle(0, -20, 40, 6, 0xff0000);
-    const hpFill   = scene.add.rectangle(0, -20, 40, 6, 0x00ff00);
+    const hpBg     = scene.add.rectangle(0, CARD.HP_Y, 40, 4, 0x440000);
+    const hpFill   = scene.add.rectangle(0, CARD.HP_Y, 40, 4, 0x32cd32);
     const starRow  = buildStarRow(scene, unit.stars || 1);
-    const badge    = buildSynergyBadge(scene);
+
+    // Bottom: work icons (1–2 emoji, small text).
+    const workStr  = charData.work.map(w => SYMBOLS.work[w] || '').join('');
+    const workText = scene.add.text(0, CARD.WORK_Y, workStr, {
+        fontSize: '10px', fontFamily: 'Arial', align: 'center'
+    }).setOrigin(0.5, 0.5);
+
+    // Top-right corner: style icon ("synergy icon" identifying the
+    // character's primary trait at a glance).
+    const styleIcon = scene.add.text(
+        CARD.STYLE_ICON_XY.x, CARD.STYLE_ICON_XY.y,
+        SYMBOLS.styles[charData.style] || '',
+        { fontSize: '11px', fontFamily: 'Arial' }
+    ).setOrigin(0.5, 0.5);
+
+    // Top-left corner: synergy ACTIVE indicator (lit by refreshSynergyBadges)
+    const badge = buildSynergyBadge(scene);
 
     const container = scene.add.container(0, 0, [
-        portrait, frame, hpBg, hpFill, starRow, badge
+        frame, portrait, hpBg, hpFill, starRow, workText, styleIcon, badge
     ]);
-    container.setSize(50, 60);
+    container.setSize(CARD.W, CARD.H);
     container.setData('uid', unit.uid);
     container.setData('unit', unit);
     container.setData('portrait', portrait);
@@ -332,18 +626,21 @@ function createUnitContainer(scene, unit) {
     container.setData('starRow', starRow);
     container.setData('badge', badge);
     // No setInteractive here — drag is handled by a scene-level pointer
-    // pipeline (see installDragPipeline) using screenToCell hit-testing.
+    // pipeline (see installDragPipeline) using card-bbox hit-testing.
     return container;
 }
 
-// Lift the card so its base sits on the cell rather than its midline crossing
-// the cell center. Children are built around y=0; the visual extends ~+28
-// below (star row). Shifting the container up by ~half its visual height
-// makes it read as "standing" on the cell.
-const CARD_BASE_LIFT = 22;
+// Lift the card so its BASE rests on the cell rather than its midline
+// crossing the cell center. With CARD.H = 80, local bottom is at y = +40.
+// LIFT = (CARD.H/2) - some_padding so the card's bottom edge lands near the
+// cell's front edge.
+const CARD_BASE_LIFT = 30;
+
+// Bench cards shrink so 80-tall card visuals fit inside 60-tall bench slots.
+const BENCH_SCALE = 0.7;
 
 // Place a unit container at its logical location.
-//   loc.kind === 'bench' → upright in the bench column, scale 1.
+//   loc.kind === 'bench' → upright in the bench column, scaled to fit slot.
 //   loc.kind === 'board' → projected screen center of the cell, scaled by
 //                          cellRenderInfo.scale (back rows = smaller).
 function placeUnitContainer(container, loc) {
@@ -351,7 +648,7 @@ function placeUnitContainer(container, loc) {
         const p = benchSlotCenter(loc.slot);
         container.x = p.x;
         container.y = p.y;
-        container.setScale(1);
+        container.setScale(BENCH_SCALE);
         container.setDepth(0);
         return;
     }
@@ -370,6 +667,7 @@ function updateHpBar(container) {
     const unit = container.getData('unit');
     const pct = Math.max(0, unit.currentHp / unit.maxHp);
     const hpFill = container.getData('hpFill');
+    // HP bar is 40 wide at full HP; scale by current/max.
     if (hpFill) hpFill.width = 40 * pct;
 }
 
@@ -401,6 +699,8 @@ window.buyUnit = function (charId) {
     const container = createUnitContainer(phaserScene, unit);
     placeUnitContainer(container, { kind: 'bench', slot });
     containers.set(unit.uid, container);
+    // After every buy, see if this completes a triple (and cascade upward).
+    checkAndMerge();
     return true;
 };
 
@@ -428,11 +728,9 @@ function snapBack(container, origin) {
 }
 
 // Pickup hit-test: find the topmost player card whose screen bbox contains
-// (x, y). This handles cards that are visually lifted above their cell
-// (CARD_BASE_LIFT) where a cell-quad test would miss the upper half. Works
-// for both board and bench cards.
-const CARD_HALF_W = 26;
-const CARD_HALF_H = 32;
+// (x, y). Bbox matches the vertical card visual (50×80) + a few px of slop.
+const CARD_HALF_W = CARD.W / 2 + 2;
+const CARD_HALF_H = CARD.H / 2 + 2;
 function findPlayerCardAt(x, y) {
     let found = null;
     let maxDepth = -Infinity;
@@ -483,7 +781,15 @@ function installDragPipeline(scene) {
         container.setAlpha(1);
         container.setDepth(0);
 
-        // For DROP we still use cell/slot hit-test on the destination.
+        // Drop targets, in priority order:
+        //   1. Sell zone     → refund gold, destroy unit.
+        //   2. P1 board cell → place / swap.
+        //   3. Bench slot    → place / swap.
+        //   Otherwise        → snap back to origin.
+        if (pointInSellZone(pointer.x, pointer.y)) {
+            sellUnit(container, unit, origin);
+            return;
+        }
         const cell = screenToCell(pointer.x, pointer.y, 'p1');
         if (cell) {
             tryPlaceOnBoard(container, unit, origin, cell);
@@ -531,7 +837,7 @@ function tryPlaceOnBoard(container, unit, origin, cell) {
     if (occupant && occupant.uid !== unit.uid) {
         const occContainer = containers.get(occupant.uid);
         if (origin.kind === 'bench') {
-            state.bench[origin.slot] = occupant;   // direct: see note at bottom of file
+            state.benchSet(origin.slot, occupant);
             placeUnitContainer(occContainer, { kind: 'bench', slot: origin.slot });
         } else {
             state.boardPlace(origin.col, origin.row, occupant);
@@ -540,25 +846,170 @@ function tryPlaceOnBoard(container, unit, origin, cell) {
     }
 }
 
+// Refund the unit's current value and remove it. Refund multiplier scales with
+// stars: 1×/3×/9× of the base cost for 1★/2★/3★ (set in ECONOMY.SELL_REFUND).
+function sellUnit(container, unit, origin) {
+    const charData = CHARACTERS[unit.charId];
+    const mult     = (ECONOMY.SELL_REFUND && ECONOMY.SELL_REFUND[unit.stars]) || 1;
+    const refund   = charData.cost * mult;
+
+    if (origin.kind === 'bench') state.benchTake(origin.slot);
+    else                          state.boardPlace(origin.col, origin.row, null);
+
+    container.destroy();
+    containers.delete(unit.uid);
+
+    state.addGold(refund, 'sell');
+    flashMessage(`Sold ${charData.displayName} (+${refund}g)`);
+}
+
 function tryPlaceOnBench(container, unit, origin, slot) {
     const occupant = state.bench[slot];
 
     if (origin.kind === 'bench') state.benchTake(origin.slot);
     else                          state.boardPlace(origin.col, origin.row, null);
 
-    state.bench[slot] = unit;                       // direct: see note at bottom
+    state.benchSet(slot, unit);
     placeUnitContainer(container, { kind: 'bench', slot });
 
     if (occupant && occupant.uid !== unit.uid) {
         const occContainer = containers.get(occupant.uid);
         if (origin.kind === 'bench') {
-            state.bench[origin.slot] = occupant;
+            state.benchSet(origin.slot, occupant);
             placeUnitContainer(occContainer, { kind: 'bench', slot: origin.slot });
         } else {
             state.boardPlace(origin.col, origin.row, occupant);
             placeUnitContainer(occContainer, { kind: 'board', col: origin.col, row: origin.row, side: 'p1' });
         }
     }
+}
+
+// ===========================================================================
+// ABILITIES  (scaffolded — generic visuals, ready for an art swap)
+// ===========================================================================
+// Contract per character (optional, in dictionary.js):
+//   ability: { id: "<key in ABILITIES>", chargeMax: N }
+//
+// combatTick calls tryCastAbility(...) on every attacker after its normal
+// attack lands. The caster's `abilityCharge` ticks up by 1 each attack and
+// at chargeMax the matching handler in ABILITIES fires. To swap art for a
+// specific ability later, replace its execute() — combat / charge / damage
+// plumbing doesn't change.
+//
+// All damage from abilities goes through applyDamage() so the death path
+// (enemy destroy() vs player hide+deactivate-for-resurrection) is consistent
+// with the basic-attack code.
+
+function applyDamage(target, dmg) {
+    if (!target.active) return;
+    const u = target.getData('unit');
+    u.currentHp -= dmg;
+    updateHpBar(target);
+    if (u.currentHp <= 0) {
+        if (u.isEnemy) target.destroy();
+        else { target.setVisible(false); target.setActive(false); }
+    }
+}
+
+const ABILITIES = {
+    // Cyan lightning that bounces to up to 3 nearest enemies, dealing
+    // diminishing damage on each bounce.
+    chain_zap: {
+        name: "Chain Zap",
+        execute(scene, caster, allies, enemies) {
+            const live = enemies.filter(c => c.active && c.visible);
+            if (live.length === 0) return;
+            const sorted = live
+                .map(t => ({ t, d: Phaser.Math.Distance.Between(caster.x, caster.y, t.x, t.y) }))
+                .sort((a, b) => a.d - b.d)
+                .slice(0, 3)
+                .map(x => x.t);
+            const cu = caster.getData('unit');
+            const baseDmg = Math.floor(90 * starMultiplier(cu.stars));
+            let prev = caster;
+            sorted.forEach((t, i) => {
+                const zap = scene.add.graphics();
+                zap.lineStyle(3, 0x00ffff, 1);
+                zap.beginPath();
+                zap.moveTo(prev.x, prev.y);
+                // Mid-jag for a "lightning" feel.
+                const mx = (prev.x + t.x) / 2 + (Math.random() - 0.5) * 24;
+                const my = (prev.y + t.y) / 2 + (Math.random() - 0.5) * 24;
+                zap.lineTo(mx, my);
+                zap.lineTo(t.x, t.y);
+                zap.strokePath();
+                scene.tweens.add({
+                    targets: zap, alpha: 0, duration: 420,
+                    onComplete: () => zap.destroy()
+                });
+                applyDamage(t, Math.floor(baseDmg * Math.pow(0.7, i)));
+                prev = t;
+            });
+        }
+    },
+    // Expanding ring centered on caster; everything caught in the final
+    // radius takes flat damage.
+    aoe_blast: {
+        name: "Blast",
+        execute(scene, caster, allies, enemies) {
+            const radius = 110;
+            const ring = scene.add.graphics();
+            ring.lineStyle(3, 0xff922b, 1);
+            const obj = { r: 8 };
+            scene.tweens.add({
+                targets: obj, r: radius, duration: 480, ease: 'Cubic.easeOut',
+                onUpdate: () => {
+                    ring.clear();
+                    ring.lineStyle(3, 0xff922b, Math.max(0, 1 - obj.r / radius));
+                    ring.strokeCircle(caster.x, caster.y, obj.r);
+                },
+                onComplete: () => ring.destroy()
+            });
+            const cu = caster.getData('unit');
+            const dmg = Math.floor(70 * starMultiplier(cu.stars));
+            enemies.forEach(t => {
+                if (!t.active || !t.visible) return;
+                const d = Phaser.Math.Distance.Between(caster.x, caster.y, t.x, t.y);
+                if (d <= radius) applyDamage(t, dmg);
+            });
+        }
+    },
+    // Green pulse on caster; restores HP to every living ally.
+    heal_aura: {
+        name: "Aura",
+        execute(scene, caster, allies, enemies) {
+            const cu = caster.getData('unit');
+            const heal = Math.floor(120 * starMultiplier(cu.stars));
+            const ring = scene.add.graphics();
+            ring.fillStyle(0x32cd32, 0.28);
+            ring.fillCircle(caster.x, caster.y, 70);
+            scene.tweens.add({
+                targets: ring, alpha: 0, duration: 600,
+                onComplete: () => ring.destroy()
+            });
+            allies.forEach(c => {
+                if (!c.active || !c.visible) return;
+                const u = c.getData('unit');
+                u.currentHp = Math.min(u.maxHp, u.currentHp + heal);
+                updateHpBar(c);
+            });
+        }
+    }
+};
+
+// Tick a caster's charge after their normal attack. Fires the handler at
+// chargeMax and resets. Silently no-ops for characters without `ability`.
+function tryCastAbility(scene, attacker, allies, enemies) {
+    const u   = attacker.getData('unit');
+    const def = CHARACTERS[u.charId].ability;
+    if (!def) return;
+    u.abilityCharge = (u.abilityCharge || 0) + 1;
+    if (u.abilityCharge < (def.chargeMax || 3)) return;
+    u.abilityCharge = 0;
+    const handler = ABILITIES[def.id];
+    if (!handler) return;
+    handler.execute(scene, attacker, allies, enemies);
+    flashMessage(`${CHARACTERS[u.charId].displayName}: ${handler.name}!`);
 }
 
 // ===========================================================================
@@ -607,6 +1058,9 @@ function combatTick() {
         return;
     }
 
+    // Cache the active synergies once per tick (only player units benefit).
+    const syn = activeSynergies();
+
     [...playerUnits, ...liveEnemies].forEach(attacker => {
         if (!attacker.active) return;
         const aUnit = attacker.getData('unit');
@@ -620,9 +1074,10 @@ function combatTick() {
             return dc < dcl ? curr : closest;
         });
 
-        const aStats = CHARACTERS[aUnit.charId].baseStats;
+        // Player units get synergy buffs; enemies use raw star-scaled stats.
+        const aStats = aUnit.isEnemy ? getScaledStats(aUnit) : computeCombatStats(aUnit, syn);
         const tUnit  = target.getData('unit');
-        const tStats = CHARACTERS[tUnit.charId].baseStats;
+        const tStats = tUnit.isEnemy ? getScaledStats(tUnit) : computeCombatStats(tUnit, syn);
         const damage = Math.max(5, aStats.attack - tStats.armor / 2);
         tUnit.currentHp -= damage;
 
@@ -639,37 +1094,76 @@ function combatTick() {
         });
 
         updateHpBar(target);
-        if (tUnit.currentHp <= 0) target.destroy();
+        if (tUnit.currentHp <= 0) {
+            // Player units come back next round, so we hide+deactivate
+            // instead of destroying. Enemies are spawned fresh each round,
+            // so we can destroy them outright.
+            if (tUnit.isEnemy) {
+                target.destroy();
+            } else {
+                target.setVisible(false);
+                target.setActive(false);
+            }
+        }
+
+        // Charge the attacker's ability and maybe cast it.
+        const allies = aUnit.isEnemy
+            ? liveEnemies.filter(c => c.active)
+            : playerUnits.filter(c => c.active);
+        const foes = aUnit.isEnemy
+            ? playerUnits.filter(c => c.active)
+            : liveEnemies.filter(c => c.active);
+        tryCastAbility(phaserScene, attacker, allies, foes);
     });
+}
+
+// Damage taken on a loss = base 2 + sum over surviving enemies of
+//   max(1, floor((stars + cost) * hpRatio / 2))
+// So a 3★ 5g enemy at full HP hits for floor(8 * 1.0 / 2) = 4, while a 1★ 1g
+// at 10% HP hits for max(1, 0) = 1.
+function computeLossDamage(survivors) {
+    let dmg = 2;
+    survivors.forEach(c => {
+        const u    = c.getData('unit');
+        const cost = CHARACTERS[u.charId].cost;
+        const hpR  = Math.max(0, u.currentHp / u.maxHp);
+        dmg += Math.max(1, Math.floor((u.stars + cost) * hpR / 2));
+    });
+    return dmg;
 }
 
 function endCombat(won) {
     if (combatTimer) { combatTimer.remove(); combatTimer = null; }
 
-    // Clean up enemies regardless of outcome
+    // Score enemy survivors BEFORE we destroy their containers.
+    const enemySurvivors = enemies.filter(c => c.active);
+    const lossDamage = won ? 0 : computeLossDamage(enemySurvivors);
+
     enemies.forEach(c => { if (c.active) c.destroy(); });
     enemies = [];
 
-    // Heal survivors and reap the dead from state + container map
-    const deadUids = [];
-    containers.forEach((c, uid) => {
-        if (!c.active) {
-            deadUids.push(uid);
-            return;
-        }
+    // Resurrect — restore HP and visibility for every player unit, then
+    // re-place it at its logical location (handles position drift if anything
+    // moved during combat). state.board/bench are NOT reaped: dead units
+    // come back next round.
+    containers.forEach((c) => {
         const u = c.getData('unit');
         u.currentHp = u.maxHp;
+        u.abilityCharge = 0;       // reset cast meter between rounds
         updateHpBar(c);
-        // Drag re-enables automatically when state.phase flips back to 'planning'.
-    });
-    deadUids.forEach(uid => {
-        const loc = findUnitLocation(uid);
-        if (loc && loc.kind === 'board') state.boardPlace(loc.col, loc.row, null);
-        else if (loc && loc.kind === 'bench') state.benchTake(loc.slot);
-        containers.delete(uid);
+        c.setVisible(true);
+        c.setActive(true);
+        const loc = findUnitLocation(u.uid);
+        if (loc) {
+            if (loc.kind === 'board') {
+                placeUnitContainer(c, { kind: 'board', col: loc.col, row: loc.row, side: 'p1' });
+            } else {
+                placeUnitContainer(c, { kind: 'bench', slot: loc.slot });
+            }
+        }
     });
 
-    state.recordCombatResult(won);
+    state.recordCombatResult(won, lossDamage);
 
     if (state.phase === 'gameover') {
         flashMessage('Game over — you ran out of HP!');
@@ -678,9 +1172,11 @@ function endCombat(won) {
 
     // Round transition
     state.collectRoundIncome();
+    applyRoundStartSynergyEconomy();
     state.rollShop(CHARACTERS);
     renderShop();
-    flashMessage(won ? 'Round won.' : 'Round lost.');
+    if (won) flashMessage('Round won.');
+    else     flashMessage(`Round lost. -${lossDamage} HP`);
 
     const fightBtn = document.getElementById('start-fight-btn');
     if (fightBtn) fightBtn.style.display = '';
@@ -690,29 +1186,44 @@ function endCombat(won) {
 // SYNERGY PANEL (HTML side panels)
 // ===========================================================================
 function updateSynergyPanel() {
-    const styleCounts = {};
-    const workCounts  = {};
-    const uniqueUnits = new Map();
+    const syn = activeSynergies();
 
+    // Build the deployed-roster unique map for the unit list (separate from
+    // synergy aggregation since activeSynergies already de-dupes).
+    const uniqueUnits = new Map();
     state.board.forEach(row => row.forEach(unit => {
         if (!unit) return;
         const data = CHARACTERS[unit.charId];
-        if (uniqueUnits.has(data.id)) return;
-        uniqueUnits.set(data.id, data);
-        styleCounts[data.style] = (styleCounts[data.style] || 0) + 1;
-        data.work.forEach(w => workCounts[w] = (workCounts[w] || 0) + 1);
+        if (!uniqueUnits.has(data.id)) uniqueUnits.set(data.id, data);
     }));
+
+    const tierStars = (tier) => '★'.repeat(tier + 1); // tier 0 → ★, tier 1 → ★★, tier 2 → ★★★
+
+    // Render a single synergy row. Inactive synergies (tier < 0) are dimmed so
+    // the player can see what they're working toward.
+    function renderRow(name, icon, info, def) {
+        const next  = def.thresholds.find(t => t > info.count);
+        const stars = info.tier >= 0 ? tierStars(info.tier) : '';
+        const color = info.tier >= 0 ? '#ffd43b' : '#888';
+        const nextStr = next ? ` <span style="color:#666">→ ${next}</span>` : '';
+        const globalTag = def.global && info.tier >= 0
+            ? ` <span style="color:#ff922b;font-weight:bold">COMMAND</span>`
+            : '';
+        return `<div style="color:${color}">
+          ${icon} ${name} ${stars} <strong>${info.count}</strong>${nextStr}${globalTag}
+        </div>`;
+    }
 
     const synPanel = document.querySelector('.p1-synergies');
     if (synPanel) {
         let html = '<strong style="color:white; display:block; margin-bottom:5px;">Active Synergies</strong>';
         let any = false;
-        Object.keys(styleCounts).forEach(s => {
-            html += `<div>${SYMBOLS.styles[s] || ''} ${s}: <strong>${styleCounts[s]}</strong></div>`;
+        Object.keys(syn.styles).forEach(s => {
+            html += renderRow(s, SYMBOLS.styles[s] || '', syn.styles[s], SYNERGIES.styles[s]);
             any = true;
         });
-        Object.keys(workCounts).forEach(w => {
-            html += `<div>${SYMBOLS.work[w] || ''} ${w}: <strong>${workCounts[w]}</strong></div>`;
+        Object.keys(syn.works).forEach(w => {
+            html += renderRow(w, SYMBOLS.work[w] || '', syn.works[w], SYNERGIES.works[w]);
             any = true;
         });
         synPanel.innerHTML = any ? html : '<p style="color:#666;">No active synergies</p>';
@@ -737,42 +1248,19 @@ function updateSynergyPanel() {
 // ===========================================================================
 // SYNERGY BADGES (on-unit indicator)
 // ===========================================================================
-// A unit's badge lights up when at least one of its style or work tags has
-// ≥ SYNERGY_ACTIVE_THRESHOLD distinct contributors on the player's board.
-// Color is the unit's STYLE color when the style is active; otherwise white
-// (work-only contributor). Cheap to compute and runs on every 'board' event.
-const SYNERGY_ACTIVE_THRESHOLD = 2;
-
-function computeActiveSynergies() {
-    const styleCounts = {};
-    const workCounts  = {};
-    const seen = new Set();
-    state.board.forEach(row => row.forEach(u => {
-        if (!u || seen.has(u.charId)) return;
-        seen.add(u.charId);
-        const d = CHARACTERS[u.charId];
-        styleCounts[d.style] = (styleCounts[d.style] || 0) + 1;
-        d.work.forEach(w => workCounts[w] = (workCounts[w] || 0) + 1);
-    }));
-    const activeStyles = new Set(
-        Object.keys(styleCounts).filter(k => styleCounts[k] >= SYNERGY_ACTIVE_THRESHOLD)
-    );
-    const activeWorks  = new Set(
-        Object.keys(workCounts).filter(k => workCounts[k] >= SYNERGY_ACTIVE_THRESHOLD)
-    );
-    return { activeStyles, activeWorks };
-}
-
+// A unit's badge lights up when its style or any of its work tags has reached
+// tier 0 (first threshold). Color reflects the style when the style is the
+// active one; falls back to white if only a work tag is active.
 function refreshSynergyBadges() {
-    const { activeStyles, activeWorks } = computeActiveSynergies();
+    const syn = activeSynergies();
     containers.forEach(c => {
         const unit = c.getData('unit');
         if (!unit || unit.isEnemy) return;
         const badge = c.getData('badge');
         if (!badge) return;
         const data = CHARACTERS[unit.charId];
-        const styleActive = activeStyles.has(data.style);
-        const workActive  = data.work.some(w => activeWorks.has(w));
+        const styleActive = syn.styles[data.style] && syn.styles[data.style].tier >= 0;
+        const workActive  = data.work.some(w => syn.works[w] && syn.works[w].tier >= 0);
         const loc = findUnitLocation(unit.uid);
         const onBoard = loc && loc.kind === 'board';
         if (onBoard && (styleActive || workActive)) {
@@ -902,19 +1390,29 @@ document.addEventListener('DOMContentLoaded', () => {
 
         // Round 1 starting setup
         state.collectRoundIncome();
+        applyRoundStartSynergyEconomy();   // no-op until you deploy units
         state.rollShop(CHARACTERS);
         renderShop();
         refreshHud();
         updateSynergyPanel();
 
-        // Refresh button = paid reroll (2g)
+        // Refresh button — free reroll (Recruiter synergy) first, else 2g.
         const refreshBtn = document.querySelector('.refresh-btn');
         if (refreshBtn) {
             refreshBtn.addEventListener('click', () => {
+                if (state.freeRerolls > 0) {
+                    state.freeRerolls -= 1;
+                    state.rollShop(CHARACTERS);
+                    renderShop();
+                    updateRefreshButton();
+                    flashMessage(`Free reroll (${state.freeRerolls} left)`);
+                    return;
+                }
                 if (state.rollShop(CHARACTERS, { paid: true })) renderShop();
                 else flashMessage('Not enough gold to reroll');
             });
         }
+        updateRefreshButton();
 
         // Inject a "Buy XP" button next to refresh
         const shopHeader = document.querySelector('.shop-header');
@@ -945,12 +1443,3 @@ document.addEventListener('DOMContentLoaded', () => {
     }, 120);
 });
 
-// ===========================================================================
-// NOTE on `state.bench[i] = unit` direct assignment
-// ===========================================================================
-// In `tryPlaceOnBoard` / `tryPlaceOnBench` we directly mutate state.bench
-// when swapping. This bypasses the GameState event emit. It's safe in Phase 0
-// because nothing currently subscribes to bench events — the bench is rendered
-// imperatively (the Phaser container is moved to benchSlotCenter immediately
-// after). When you add a bench HUD that listens for events, add a `benchSet`
-// method to GameState and use that instead.
