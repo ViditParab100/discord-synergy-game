@@ -60,6 +60,7 @@
       this.xp         = 0;
       this.streak     = 0;
       this.streakKind = null;        // 'win' | 'loss' | null
+      this.freeRerolls = 0;          // granted by Recruiter synergy at round start
 
       // bench[i] = { charId, stars } | null
       this.bench = new Array(ECONOMY.BENCH_SIZE).fill(null);
@@ -157,6 +158,13 @@
       this._emit({ type: 'bench', slot });
       return u;
     }
+    // Direct slot assignment that still fires the 'bench' event. Use this
+    // for swaps where the slot is already known (e.g., dragging a unit onto
+    // an occupied bench slot displaces the occupant back to the source).
+    benchSet(slot, unit) {
+      this.bench[slot] = unit;
+      this._emit({ type: 'bench', slot });
+    }
 
     // ------------- board -------------
     boardPlace(col, row, unit) {
@@ -188,19 +196,20 @@
     }
 
     // ------------- combat result -------------
-    recordCombatResult(won) {
+    // `damage` is computed by the caller from the actual enemy survivors
+    // (stars, cost, HP%). Only applied on a loss; ignored on a win.
+    recordCombatResult(won, damage = 0) {
       if (won) {
         this.streak = this.streakKind === 'win' ? this.streak + 1 : 1;
         this.streakKind = 'win';
       } else {
         this.streak = this.streakKind === 'loss' ? this.streak + 1 : 1;
         this.streakKind = 'loss';
-        // damage scales with surviving enemy board size; for now use a flat 2 + board floor
-        this.playerHp = Math.max(0, this.playerHp - (2 + Math.floor(this.boardCount() / 2)));
+        this.playerHp = Math.max(0, this.playerHp - damage);
       }
       this.round += 1;
       this.phase = this.playerHp <= 0 ? 'gameover' : 'planning';
-      this._emit({ type: 'roundEnd', won });
+      this._emit({ type: 'roundEnd', won, damage });
     }
 
     snapshot() {

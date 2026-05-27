@@ -33,6 +33,8 @@
     "FlipJames":      { "portrait": "portraits/FlipJames.png" },
     "Ganji_Chudail":  { "portrait": "portraits/Ganji_Chudail.png" },
     "MarmotMenace":   { "portrait": "portraits/MarmotMenace.png" },
-    "Leandra":        { "portrait": "portraits/Leandra.png" }
+    "Leandra":        { "portrait": "portraits/Leandra.png" },
+
+    "NeonVader":      { "portrait": "portraits/NeonVader.png" }
   }
 }
