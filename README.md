@@ -29,7 +29,10 @@ discord-synergy-game/
 ├── client/
 │   ├── index.html        # Main UI layout and shop structure
 │   ├── style.css         # Styling for the HUD and panels
-│   └── game.js           # Phaser 3 rendering + drag/drop + combat
+│   ├── game.js           # Phaser 3 rendering + drag/drop + combat
+│   └── assets/
+│       ├── manifest.json # Registry of which portraits exist for which charIds
+│       └── portraits/    # Drop 96x96 PNG portraits here (name = charId from dictionary)
 ├── shared/
 │   ├── dictionary.js     # Global character database and synergy symbols
 │   ├── gameState.js      # GameState class — gold, round, hp, bench, board, shop
@@ -118,31 +121,25 @@ Every coordinate computation in `game.js` goes through those helpers. When persp
 - [x] Drag-drop swap (units exchange positions instead of blocking)
 - [x] Round loop wired end-to-end (fight → result → income → next round)
 
-### 🔜 Phase 1 — Go 2.5D
-- [ ] Add CSS `perspective(900px) rotateX(28deg)` to the Phaser canvas
-- [ ] Flip `Perspective.enabled = true` and call `patchPhaserPointer(game)` in `create()`
-- [ ] Restyle grid cells from flat strokes to neon glow lines (match the mockup)
-- [ ] Test drag/drop in back rows where projection distortion is greatest
+### ✅ Phase 1 — Go 2.5D (DONE)
+- [x] CSS `perspective(900px) rotateX(28deg)` on `.board-container`
+- [x] `Perspective.enabled = true` and `patchPhaserPointer(game)` wired in `create()`
+- [x] Grid cells restyled as 3-pass neon glow lines with a gentle alpha pulse
+- [ ] Manual smoke test: drag a unit into the back row (top of P1 grid). Pointer should land on the correct cell despite the tilt — `patchPhaserPointer` handles this by reading `event.offsetX/Y` against the un-transformed canvas
 
-**How to enable:**
-1. In `client/style.css`, add to the `#phaser-game-canvas` (or board container) rule:
-   ```css
-   transform: perspective(900px) rotateX(28deg);
-   transform-origin: 50% 50%;
-   ```
-2. In `client/game.js`, uncomment the two lines at the bottom of `create()`:
-   ```js
-   Perspective.enabled = true;
-   patchPhaserPointer(game);
-   ```
+### 🎨 Phase 2 — Graphics Pipeline (INFRA DONE, ART PENDING)
+- [x] `client/assets/manifest.json` registers a portrait path for every charId in `dictionary.js`
+- [x] Phaser `preload()` loads the manifest, then loads each listed portrait; missing files are caught by `loaderror` and silently ignored
+- [x] `createUnitContainer()` uses the portrait texture when present, else falls back to the Phase 0 colored rectangle + label
+- [x] Cost-tier frame overlay (grey/green/blue/purple/gold) drawn as a neon ring around every unit
+- [x] Star row below portrait (1★/2★/3★) rendered as Phaser graphics polygons
+- [x] Synergy badge dot in the top-right corner — lights up when any of the unit's style/work tags has ≥2 distinct contributors on the player's board
+- [ ] **Art delivery:** generate ~29 portraits (chibi-headshot, neon rim light, transparent background, 96×96 PNG) and drop them into `client/assets/portraits/`. File name must match the charId in `dictionary.js` (e.g. `Star_Vader.png`). The game will pick them up on next reload — no code change needed.
 
-### 🎨 Phase 2 — Graphics Pipeline
-- [ ] Replace rectangle placeholders with character portrait sprites (~96×96 PNG)
-- [ ] Generate all ~28 portraits in a single AI batch with consistent style guide (chibi-headshot, neon rim light, transparent background, square crop)
-- [ ] Frame overlay colored by cost tier (grey/green/blue/purple/gold)
-- [ ] Star row below portrait (1★/2★/3★) as graphics, not text
-- [ ] Synergy badges on units when their synergy is active
-- [ ] `manifest.json` in `client/assets/` to keep loader and dictionary in sync
+**How portraits load:**
+1. `manifest.json` lists every charId → relative PNG path
+2. On Phaser preload, the manifest is fetched first, then images are queued from it
+3. A missing PNG triggers `loaderror`, which logs a warning and falls back to the rectangle placeholder at render time
 
 ### 💰 Phase 3 — Power Scaling & Upgrades
 - [ ] Add 5g "Legendary" tier units to `dictionary.js`

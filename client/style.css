@@ -96,6 +96,8 @@ body {
 .health-fill.enemy { background-color: #ff6b6b; }
 
 /* The Game Board Container */
+/* Phase 2: canvas stays flat; the board tilt is drawn in Phaser via project()
+   so unit cards can stand upright as billboards. */
 .board-container {
     grid-area: main;
     background-color: #17171d;
@@ -106,8 +108,6 @@ body {
     align-items: center;
     position: relative;
     box-shadow: inset 0 0 20px rgba(0,0,0,0.5);
-    transform: perspective(900px) rotateX(28deg);
-    transform-origin: 50% 50%;
 }
 
 .placeholder-text {

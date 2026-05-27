@@ -17,8 +17,8 @@
     STARTING_HP: 100,
     STARTING_LEVEL: 2,
     BENCH_SIZE: 7,
-    BOARD_COLS: 3,
-    BOARD_ROWS: 7,
+    BOARD_COLS: 5,    // keep in sync with shared/coords.js BOARD.COLS
+    BOARD_ROWS: 7,    // keep in sync with shared/coords.js BOARD.ROWS
 
     ROUND_INCOME: 5,
     INTEREST_PER: 10,         // +1g per 10g held

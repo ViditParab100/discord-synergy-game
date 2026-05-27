@@ -1,0 +1,38 @@
+{
+  "_meta": {
+    "version": 1,
+    "portraitSize": 96,
+    "note": "Keys must match CHARACTERS keys in shared/dictionary.js. PNG files live in assets/portraits/. Missing files fall back to rectangle placeholder at runtime — no code change needed when art arrives."
+  },
+  "portraits": {
+    "RockStarDad":    { "portrait": "portraits/RockStarDad.png" },
+    "Profu":          { "portrait": "portraits/Profu.png" },
+    "irina_88":       { "portrait": "portraits/irina_88.png" },
+    "MasterBart":     { "portrait": "portraits/MasterBart.png" },
+    "Berlin":         { "portrait": "portraits/Berlin.png" },
+    "Lurio":          { "portrait": "portraits/Lurio.png" },
+    "Craig_demon":    { "portrait": "portraits/Craig_demon.png" },
+    "Binkly":         { "portrait": "portraits/Binkly.png" },
+    "Andrew":         { "portrait": "portraits/Andrew.png" },
+    "Helen":          { "portrait": "portraits/Helen.png" },
+    "Drago":          { "portrait": "portraits/Drago.png" },
+    "CG":             { "portrait": "portraits/CG.png" },
+    "Reh":            { "portrait": "portraits/Reh.png" },
+    "Xtatik":         { "portrait": "portraits/Xtatik.png" },
+    "KuroKrysel":     { "portrait": "portraits/KuroKrysel.png" },
+    "Epic":           { "portrait": "portraits/Epic.png" },
+    "Young":          { "portrait": "portraits/Young.png" },
+    "Wkd_w0lf":       { "portrait": "portraits/Wkd_w0lf.png" },
+    "Bob":            { "portrait": "portraits/Bob.png" },
+    "Star_Vader":     { "portrait": "portraits/Star_Vader.png" },
+    "Spidernnam":     { "portrait": "portraits/Spidernnam.png" },
+    "LoloCoko":       { "portrait": "portraits/LoloCoko.png" },
+    "Rockless":       { "portrait": "portraits/Rockless.png" },
+    "Ashe_me":        { "portrait": "portraits/Ashe_me.png" },
+    "Kelly_maxine":   { "portrait": "portraits/Kelly_maxine.png" },
+    "FlipJames":      { "portrait": "portraits/FlipJames.png" },
+    "Ganji_Chudail":  { "portrait": "portraits/Ganji_Chudail.png" },
+    "MarmotMenace":   { "portrait": "portraits/MarmotMenace.png" },
+    "Leandra":        { "portrait": "portraits/Leandra.png" }
+  }
+}
