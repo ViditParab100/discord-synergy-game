@@ -18,6 +18,7 @@
                 <span class="score">1</span>
                 <span class="timer">10/20</span>
                 <span class="score enemy">0</span>
+                <button id="start-fight-btn" style="background: #ff4757; color: white; border: none; padding: 5px 15px; border-radius: 5px; font-weight: bold; cursor: pointer; margin-left: 20px;">FIGHT!</button>
             </div>
             <div class="synergy-panel enemy">
                 <p><strong>OutdoorPerson: (2/4)</strong></p>
@@ -28,28 +29,37 @@
         <aside class="side-panel left-panel">
             <div class="player-profile">
                 <img src="placeholder-avatar.png" alt="P1" class="avatar">
-                <h3>NeonVader</h3>
-                <div class="health-bar">
-                    <div class="health-fill" style="width: 100%;">100</div>
-                </div>
+                <h3>NeonVader (You)</h3>
+                <div class="health-bar"><div class="health-fill" style="width: 100%;">100</div></div>
             </div>
-            <div class="unit-list">
-                <p>Star-Vader (Coder)</p>
-                <p>RockStarDad (Trader)</p>
+            
+            <div class="p1-synergies" style="margin-bottom: 15px; font-size: 0.9em; color: #4dabf7;">
+                </div>
+            
+            <hr style="border-color: #333; margin-bottom: 15px;">
+            
+            <div class="p1-unit-list" style="font-size: 0.85em; color: #ccc; display: flex; flex-direction: column; gap: 5px;">
+                <p style="color:#666;">No units deployed.</p>
             </div>
         </aside>
 
-        <main class="board-container" id="phaser-game-canvas">
-            <p class="placeholder-text">[ Game Board Renders Here ]</p>
-        </main>
+        <main class="board-container" id="phaser-game-canvas"></main>
 
         <aside class="side-panel right-panel">
              <div class="player-profile">
                 <img src="placeholder-avatar2.png" alt="P2" class="avatar">
-                <h3>RebelGirl</h3>
-                <div class="health-bar">
-                    <div class="health-fill enemy" style="width: 100%;">100</div>
-                </div>
+                <h3>Enemy Player</h3>
+                <div class="health-bar"><div class="health-fill enemy" style="width: 100%;">100</div></div>
+            </div>
+            
+            <div class="p2-synergies" style="margin-bottom: 15px; font-size: 0.9em; color: #ff6b6b;">
+                <p style="color:#666;">Waiting for opponent...</p>
+            </div>
+            
+            <hr style="border-color: #333; margin-bottom: 15px;">
+            
+            <div class="p2-unit-list" style="font-size: 0.85em; color: #ccc; display: flex; flex-direction: column; gap: 5px;">
+                 <p style="color:#666;">No units deployed.</p>
             </div>
         </aside>
 
