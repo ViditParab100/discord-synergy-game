@@ -9,21 +9,16 @@
 <body>
     <div class="game-container">
         
-        <header class="top-bar">
-            <div class="synergy-panel">
-                <p><strong>Strategist: (3/6)</strong></p>
-                <p><strong>Coder: (1/2)</strong></p>
-            </div>
+        <header class="top-bar" style="justify-content: center; position: relative;">
             <div class="round-info">
-                <span class="score">1</span>
-                <span class="timer">10/20</span>
-                <span class="score enemy">0</span>
-                <button id="start-fight-btn" style="background: #ff4757; color: white; border: none; padding: 5px 15px; border-radius: 5px; font-weight: bold; cursor: pointer; margin-left: 20px;">FIGHT!</button>
+                <span class="score">P1</span>
+                <span class="timer" style="margin: 0 20px; color: #aaa;">Round 1</span>
+                <span class="score enemy">P2</span>
             </div>
-            <div class="synergy-panel enemy">
-                <p><strong>OutdoorPerson: (2/4)</strong></p>
-                <p><strong>Killer: (1/2)</strong></p>
-            </div>
+            
+            <button id="start-fight-btn" style="position: absolute; right: 20px; background: #ff4757; color: white; border: none; padding: 8px 20px; border-radius: 5px; font-weight: bold; cursor: pointer; font-size: 1rem; box-shadow: 0 4px 6px rgba(0,0,0,0.3);">
+                ⚔️ FIGHT!
+            </button>
         </header>
 
         <aside class="side-panel left-panel">
