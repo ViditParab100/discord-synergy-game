@@ -79,41 +79,108 @@ function findUnitLocation(uid) {
 const config = {
     type: Phaser.AUTO,
     parent: 'phaser-game-canvas',
-    width: 650,
-    height: 550,
+    width: 1000,
+    height: 600,
     backgroundColor: '#000000',
     transparent: true,
-    scene: { create: create }
+    scene: { preload: preload, create: create }
 };
 
 const game = new Phaser.Game(config);
 
+// ===========================================================================
+// PRELOAD — asset manifest + portraits with graceful fallback
+// ===========================================================================
+// Two-stage load:
+//   1. Load assets/manifest.json
+//   2. On manifest-complete, queue an image load for each listed portrait.
+// Missing PNGs are caught by `loaderror` and fall back to rectangle units
+// at render time. This means art can drop in later without any code change.
+function preload() {
+    this.load.json('manifest', 'assets/manifest.json');
+
+    this.load.once('filecomplete-json-manifest', () => {
+        const manifest = this.cache.json.get('manifest');
+        if (!manifest || !manifest.portraits) return;
+        Object.entries(manifest.portraits).forEach(([charId, entry]) => {
+            if (entry && entry.portrait) {
+                this.load.image('portrait_' + charId, 'assets/' + entry.portrait);
+            }
+        });
+    });
+
+    this.load.on('loaderror', (file) => {
+        console.warn('[GAME] asset missing, using fallback:', file.key);
+    });
+}
+
 function create() {
     phaserScene = this;
 
-    drawGrid(this, BOARD.P1.x, BOARD.P1.y, 0x4dabf7);
-    drawGrid(this, BOARD.P2.x, BOARD.P2.y, 0xff6b6b);
+    // ---- Phase 2: 2.5D tilted grid, upright cards ----
+    // Perspective is ON: tiles project as trapeziums via cellQuad(), card
+    // containers are placed at projected screen centers via cellRenderInfo
+    // and scaled by depth (back rows smaller). Cards themselves DO NOT tilt
+    // — they stay axis-aligned billboards, which is what gives the
+    // "characters standing on a tilted board" look from the mockup.
+    Perspective.enabled = true;
+
+    drawGrid(this, 'p1', 0x4dabf7);
+    drawGrid(this, 'p2', 0xff6b6b);
     drawBench(this);
 
-    // ---- Phase 1: turn on perspective ----
-    // Add CSS to #phaser-game-canvas:
-    //   transform: perspective(900px) rotateX(28deg);
-    //   transform-origin: 50% 50%;
-    // Then uncomment these two lines:
-    Perspective.enabled = true;
-    patchPhaserPointer(game);
+    installDragPipeline(this);
 }
 
-function drawGrid(scene, startX, startY, color) {
-    const g = scene.add.graphics();
-    g.lineStyle(2, color, 0.8);
+function drawGrid(scene, side, color) {
+    // Filled axis-aligned tiles with neon border + a pulsing inner glow.
+    // Each tile is its own rectangle so it reads as a discrete slot you can
+    // drop a card onto.
+    const o = side === 'p2' ? BOARD.P2 : BOARD.P1;
+    const inset = 3;
+    const radius = 6;
+
+    const fill = scene.add.graphics();
+    fill.setDepth(-12);
+    fill.fillStyle(0x0a0a14, 0.55);
     for (let r = 0; r < BOARD.ROWS; r++) {
         for (let c = 0; c < BOARD.COLS; c++) {
-            const x = startX + c * BOARD.CELL;
-            const y = startY + r * BOARD.CELL;
-            g.strokeRect(x + 1, y + 1, BOARD.CELL - 2, BOARD.CELL - 2);
+            const x = o.x + c * BOARD.CELL + inset;
+            const y = o.y + r * BOARD.CELL + inset;
+            fill.fillRoundedRect(x, y, BOARD.CELL - 2*inset, BOARD.CELL - 2*inset, radius);
         }
     }
+
+    const border = scene.add.graphics();
+    border.setDepth(-11);
+    border.lineStyle(2, color, 0.85);
+    for (let r = 0; r < BOARD.ROWS; r++) {
+        for (let c = 0; c < BOARD.COLS; c++) {
+            const x = o.x + c * BOARD.CELL + inset;
+            const y = o.y + r * BOARD.CELL + inset;
+            border.strokeRoundedRect(x, y, BOARD.CELL - 2*inset, BOARD.CELL - 2*inset, radius);
+        }
+    }
+
+    // Pulsing inner glow ring
+    const glow = scene.add.graphics();
+    glow.setDepth(-10);
+    glow.lineStyle(1, color, 1);
+    for (let r = 0; r < BOARD.ROWS; r++) {
+        for (let c = 0; c < BOARD.COLS; c++) {
+            const x = o.x + c * BOARD.CELL + inset + 2;
+            const y = o.y + r * BOARD.CELL + inset + 2;
+            glow.strokeRoundedRect(x, y, BOARD.CELL - 2*inset - 4, BOARD.CELL - 2*inset - 4, radius - 2);
+        }
+    }
+    scene.tweens.add({
+        targets: glow,
+        alpha: { from: 0.25, to: 0.75 },
+        duration: 1800,
+        yoyo: true,
+        repeat: -1,
+        ease: 'Sine.easeInOut'
+    });
 }
 
 function drawBench(scene) {
@@ -133,44 +200,183 @@ function drawBench(scene) {
 }
 
 // ===========================================================================
-// UNIT CONTAINERS
+// UNIT CONTAINERS  (Phase 2: portrait sprite + cost frame + star row + badge)
 // ===========================================================================
-function createUnitContainer(scene, unit, x, y) {
+// Layout, top to bottom in container-local space:
+//   y=-20  HP bar (40x6)
+//   y=0    portrait/fallback (48x48), framed by cost-tier ring
+//   y=+25  star row (1/2/3 stars by unit.stars)
+// Top-right corner: synergy badge (toggled by refreshSynergyBadges()).
+//
+// Refs are stored via container.setData(name, obj) so children can be looked
+// up by name regardless of insertion order. Combat/drag only ever touches
+// these named refs — never `container.list[n]`.
+
+function buildPortraitChild(scene, unit) {
+    // Returns the visual that represents the character. Uses the loaded
+    // portrait texture when present, else a colored rectangle so the game
+    // remains fully playable before art is delivered.
     const charData = CHARACTERS[unit.charId];
-    const fill   = unit.isEnemy ? 0x882222 : (STYLE_COLORS[charData.style] || 0xffffff);
-    const border = unit.isEnemy ? 0x440000 : (COST_COLORS[charData.cost] || 0x666666);
-
-    const bg = scene.add.rectangle(0, 0, 50, 50, fill);
-    bg.setStrokeStyle(3, border);
-
+    const texKey = 'portrait_' + unit.charId;
+    if (scene.textures.exists(texKey)) {
+        const img = scene.add.image(0, 0, texKey);
+        img.setDisplaySize(48, 48);
+        if (unit.isEnemy) img.setTint(0xff8888); // red wash for enemy
+        return img;
+    }
+    // Fallback: rectangle + style icon + 3-letter name (the Phase 0 look)
+    const fill = unit.isEnemy ? 0x882222 : (STYLE_COLORS[charData.style] || 0xffffff);
+    const rect = scene.add.rectangle(0, 0, 48, 48, fill);
     const styleIcon = SYMBOLS.styles[charData.style] || '';
     const workIcons = charData.work.map(w => SYMBOLS.work[w] || '').join('');
     const shortName = charData.displayName.substring(0, 3).toUpperCase();
-
     const text = scene.add.text(0, 0, `${styleIcon}${workIcons}\n${shortName}`, {
         fontSize: '11px', fontFamily: 'Arial', color: '#000000',
         fontStyle: 'bold', align: 'center', lineSpacing: 2
     }).setOrigin(0.5);
+    // Group rect+text into a sub-container so the caller has one child to manage.
+    const group = scene.add.container(0, 0, [rect, text]);
+    group.setData('fallbackRect', rect);
+    return group;
+}
 
-    const hpBg   = scene.add.rectangle(0, -20, 40, 6, 0xff0000);
-    const hpFill = scene.add.rectangle(0, -20, 40, 6, 0x00ff00);
+function buildCostFrame(scene, cost, isEnemy) {
+    // Neon ring colored by cost tier (grey/green/blue/purple/gold).
+    // Enemies get a muted red frame for visual disambiguation.
+    const color = isEnemy ? 0x991e1e : (COST_COLORS[cost] || 0x666666);
+    const g = scene.add.graphics();
+    // outer glow
+    g.lineStyle(4, color, 0.25);
+    g.strokeRect(-25, -25, 50, 50);
+    // sharp inner edge
+    g.lineStyle(2, color, 1);
+    g.strokeRect(-24, -24, 48, 48);
+    return g;
+}
 
-    const container = scene.add.container(x, y, [bg, text, hpBg, hpFill]);
-    container.setSize(50, 50);
+function buildStarRow(scene, stars) {
+    // Tiny yellow stars at the bottom of the unit. `stars` is 1..3.
+    const g = scene.add.graphics();
+    drawStars(g, stars);
+    g.y = 25;
+    return g;
+}
+
+function drawStars(g, stars) {
+    g.clear();
+    const n = Math.max(1, Math.min(3, stars | 0));
+    const spacing = 8;
+    const startX = -((n - 1) * spacing) / 2;
+    g.fillStyle(0xffd43b, 1);
+    g.lineStyle(1, 0x8a5a00, 1);
+    for (let i = 0; i < n; i++) {
+        drawStarShape(g, startX + i * spacing, 0, 3);
+    }
+}
+
+function drawStarShape(g, cx, cy, r) {
+    // 5-point star polygon
+    const pts = [];
+    for (let i = 0; i < 10; i++) {
+        const ang = -Math.PI / 2 + i * Math.PI / 5;
+        const rr = i % 2 === 0 ? r : r * 0.5;
+        pts.push(cx + Math.cos(ang) * rr, cy + Math.sin(ang) * rr);
+    }
+    g.beginPath();
+    g.moveTo(pts[0], pts[1]);
+    for (let i = 2; i < pts.length; i += 2) g.lineTo(pts[i], pts[i + 1]);
+    g.closePath();
+    g.fillPath();
+    g.strokePath();
+}
+
+function buildSynergyBadge(scene) {
+    // Small colored dot in the top-right corner. Hidden by default;
+    // refreshSynergyBadges() turns it on for units with an active synergy.
+    const g = scene.add.graphics();
+    g.x = 18; g.y = -18;
+    g.setVisible(false);
+    return g;
+}
+
+function paintSynergyBadge(g, color) {
+    g.clear();
+    g.fillStyle(0x000000, 0.6);
+    g.fillCircle(0, 0, 6);
+    g.fillStyle(color, 1);
+    g.fillCircle(0, 0, 4.5);
+}
+
+function createUnitContainer(scene, unit) {
+    // Phase 2: standing-card. The container is built at (0,0); positioning,
+    // depth-scaling and z-order are applied by placeUnitContainer() based on
+    // whether the unit is on the bench (upright) or on the projected board.
+    const charData = CHARACTERS[unit.charId];
+
+    const portrait = buildPortraitChild(scene, unit);
+    const frame    = buildCostFrame(scene, charData.cost, unit.isEnemy);
+    const hpBg     = scene.add.rectangle(0, -20, 40, 6, 0xff0000);
+    const hpFill   = scene.add.rectangle(0, -20, 40, 6, 0x00ff00);
+    const starRow  = buildStarRow(scene, unit.stars || 1);
+    const badge    = buildSynergyBadge(scene);
+
+    const container = scene.add.container(0, 0, [
+        portrait, frame, hpBg, hpFill, starRow, badge
+    ]);
+    container.setSize(50, 60);
     container.setData('uid', unit.uid);
     container.setData('unit', unit);
-
-    if (!unit.isEnemy) {
-        container.setInteractive({ draggable: true });
-        attachDragLogic(scene, container);
-    }
+    container.setData('portrait', portrait);
+    container.setData('frame', frame);
+    container.setData('hpFill', hpFill);
+    container.setData('starRow', starRow);
+    container.setData('badge', badge);
+    // No setInteractive here — drag is handled by a scene-level pointer
+    // pipeline (see installDragPipeline) using screenToCell hit-testing.
     return container;
+}
+
+// Lift the card so its base sits on the cell rather than its midline crossing
+// the cell center. Children are built around y=0; the visual extends ~+28
+// below (star row). Shifting the container up by ~half its visual height
+// makes it read as "standing" on the cell.
+const CARD_BASE_LIFT = 22;
+
+// Place a unit container at its logical location.
+//   loc.kind === 'bench' → upright in the bench column, scale 1.
+//   loc.kind === 'board' → projected screen center of the cell, scaled by
+//                          cellRenderInfo.scale (back rows = smaller).
+function placeUnitContainer(container, loc) {
+    if (loc.kind === 'bench') {
+        const p = benchSlotCenter(loc.slot);
+        container.x = p.x;
+        container.y = p.y;
+        container.setScale(1);
+        container.setDepth(0);
+        return;
+    }
+    // board
+    const unit = container.getData('unit');
+    const side = loc.side || (unit && unit.isEnemy ? 'p2' : 'p1');
+    const info = cellRenderInfo(loc.col, loc.row, side);
+    container.x = info.screen.x;
+    container.y = info.screen.y - CARD_BASE_LIFT * info.scale;
+    container.setScale(info.scale);
+    // Larger y on screen = closer to viewer = drawn on top of back rows.
+    container.setDepth(info.screen.y);
 }
 
 function updateHpBar(container) {
     const unit = container.getData('unit');
     const pct = Math.max(0, unit.currentHp / unit.maxHp);
-    container.list[3].width = 40 * pct; // hpFill is child index 3
+    const hpFill = container.getData('hpFill');
+    if (hpFill) hpFill.width = 40 * pct;
+}
+
+function updateStarRow(container) {
+    const unit = container.getData('unit');
+    const starRow = container.getData('starRow');
+    if (starRow && unit) drawStars(starRow, unit.stars || 1);
 }
 
 // ===========================================================================
@@ -192,56 +398,113 @@ window.buyUnit = function (charId) {
 
     const unit = makeUnit(charId);
     const slot = state.benchAdd(unit);
-    const pos  = benchSlotCenter(slot);
-    const container = createUnitContainer(phaserScene, unit, pos.x, pos.y);
+    const container = createUnitContainer(phaserScene, unit);
+    placeUnitContainer(container, { kind: 'bench', slot });
     containers.set(unit.uid, container);
     return true;
 };
 
 // ===========================================================================
-// DRAG & DROP
+// DRAG & DROP  (Phase 2: scene-level pointer pipeline, screen-space hit-test)
 // ===========================================================================
-function attachDragLogic(scene, container) {
-    scene.input.setDraggable(container);
+// Phaser's per-object draggable + axis-aligned hit area can't represent the
+// projected trapezium cells on a tilted board. Instead we listen for pointer
+// events on the scene and route them ourselves:
+//
+//   pointerdown → screenToCell(p1) / benchSlotAt(p) → start drag if a unit
+//                 occupies that location
+//   pointermove → translate the dragged container to follow the pointer
+//   pointerup   → screenToCell / benchSlotAt at the drop point → place or
+//                 snap back via placeUnitContainer(origin)
+//
+// This works because the canvas no longer has a CSS transform, so
+// pointer.x/y from Phaser is already in canvas-local screen pixels — the
+// same space cellQuad() returns.
 
-    container.on('dragstart', function () {
-        this.list[0].setFillStyle(0xaaaaaa);
-        this.setData('dragStartX', this.x);
-        this.setData('dragStartY', this.y);
-        this.setDepth(1);
+let dragState = null;   // { container, unit, origin }
+
+function snapBack(container, origin) {
+    placeUnitContainer(container, origin);
+}
+
+// Pickup hit-test: find the topmost player card whose screen bbox contains
+// (x, y). This handles cards that are visually lifted above their cell
+// (CARD_BASE_LIFT) where a cell-quad test would miss the upper half. Works
+// for both board and bench cards.
+const CARD_HALF_W = 26;
+const CARD_HALF_H = 32;
+function findPlayerCardAt(x, y) {
+    let found = null;
+    let maxDepth = -Infinity;
+    containers.forEach((c) => {
+        if (!c.active) return;
+        const u = c.getData('unit');
+        if (!u || u.isEnemy) return;
+        const halfW = CARD_HALF_W * c.scaleX;
+        const halfH = CARD_HALF_H * c.scaleY;
+        if (x >= c.x - halfW && x <= c.x + halfW &&
+            y >= c.y - halfH && y <= c.y + halfH) {
+            if (c.depth > maxDepth) {
+                maxDepth = c.depth;
+                found = c;
+            }
+        }
+    });
+    return found;
+}
+
+function installDragPipeline(scene) {
+    scene.input.on('pointerdown', (pointer) => {
+        if (dragState) return;
+        if (state.phase !== 'planning') return;
+        const px = pointer.x, py = pointer.y;
+
+        // Hit-test the card itself (not the cell beneath it). This lets the
+        // user grab a card by clicking anywhere on its visual, including the
+        // lifted upper portion that floats above the tile.
+        const c = findPlayerCardAt(px, py);
+        if (c) {
+            const u = c.getData('unit');
+            const loc = findUnitLocation(u.uid);
+            if (loc) beginDrag(u, loc);
+        }
     });
 
-    container.on('drag', function (pointer, dragX, dragY) {
-        this.x = dragX; this.y = dragY;
+    scene.input.on('pointermove', (pointer) => {
+        if (!dragState) return;
+        dragState.container.x = pointer.x;
+        dragState.container.y = pointer.y;
     });
 
-    container.on('dragend', function (pointer) {
-        const unit = this.getData('unit');
-        const charData = CHARACTERS[unit.charId];
-        this.list[0].setFillStyle(STYLE_COLORS[charData.style]);
-        this.setDepth(0);
+    scene.input.on('pointerup', (pointer) => {
+        if (!dragState) return;
+        const { container, unit, origin } = dragState;
+        dragState = null;
+        container.setAlpha(1);
+        container.setDepth(0);
 
-        const startX = this.getData('dragStartX');
-        const startY = this.getData('dragStartY');
-
-        const origin = findUnitLocation(unit.uid);
-        if (!origin) { this.x = startX; this.y = startY; return; }
-
-        // Target candidates: P1 board cell, then bench slot, else invalid.
-        const cell = worldToGrid(pointer.x, pointer.y, 'p1');
-        if (cell) { tryPlaceOnBoard(this, unit, origin, cell); return; }
-
+        // For DROP we still use cell/slot hit-test on the destination.
+        const cell = screenToCell(pointer.x, pointer.y, 'p1');
+        if (cell) {
+            tryPlaceOnBoard(container, unit, origin, cell);
+            return;
+        }
         const slot = benchSlotAt(pointer.x, pointer.y);
-        if (slot !== -1) { tryPlaceOnBench(this, unit, origin, slot); return; }
-
-        // Invalid: snap back
-        this.x = startX; this.y = startY;
+        if (slot !== -1) {
+            tryPlaceOnBench(container, unit, origin, slot);
+            return;
+        }
+        snapBack(container, origin);
     });
 }
 
-function snapBack(container) {
-    container.x = container.getData('dragStartX');
-    container.y = container.getData('dragStartY');
+function beginDrag(unit, origin) {
+    const container = containers.get(unit.uid);
+    if (!container) return;
+    dragState = { container, unit, origin };
+    container.setAlpha(0.6);
+    container.setDepth(10000);   // float above everything while dragging
+    container.setScale(1);       // un-shrink so back-row pickups don't look tiny
 }
 
 function tryPlaceOnBoard(container, unit, origin, cell) {
@@ -251,7 +514,7 @@ function tryPlaceOnBoard(container, unit, origin, cell) {
     if (!occupant && origin.kind === 'bench') {
         if (state.boardCount() >= state.capForLevel()) {
             flashMessage(`Board limit: ${state.capForLevel()} units at level ${state.level}`);
-            snapBack(container);
+            snapBack(container, origin);
             return;
         }
     }
@@ -262,21 +525,17 @@ function tryPlaceOnBoard(container, unit, origin, cell) {
 
     // Place on target cell
     state.boardPlace(cell.col, cell.row, unit);
-    const target = gridToWorld(cell.col, cell.row, 'p1');
-    container.x = target.x;
-    container.y = target.y;
+    placeUnitContainer(container, { kind: 'board', col: cell.col, row: cell.row, side: 'p1' });
 
     // Move any displaced occupant back to where the dragged unit came from
     if (occupant && occupant.uid !== unit.uid) {
         const occContainer = containers.get(occupant.uid);
         if (origin.kind === 'bench') {
             state.bench[origin.slot] = occupant;   // direct: see note at bottom of file
-            const p = benchSlotCenter(origin.slot);
-            occContainer.x = p.x; occContainer.y = p.y;
+            placeUnitContainer(occContainer, { kind: 'bench', slot: origin.slot });
         } else {
             state.boardPlace(origin.col, origin.row, occupant);
-            const p = gridToWorld(origin.col, origin.row, 'p1');
-            occContainer.x = p.x; occContainer.y = p.y;
+            placeUnitContainer(occContainer, { kind: 'board', col: origin.col, row: origin.row, side: 'p1' });
         }
     }
 }
@@ -288,19 +547,16 @@ function tryPlaceOnBench(container, unit, origin, slot) {
     else                          state.boardPlace(origin.col, origin.row, null);
 
     state.bench[slot] = unit;                       // direct: see note at bottom
-    const p = benchSlotCenter(slot);
-    container.x = p.x; container.y = p.y;
+    placeUnitContainer(container, { kind: 'bench', slot });
 
     if (occupant && occupant.uid !== unit.uid) {
         const occContainer = containers.get(occupant.uid);
         if (origin.kind === 'bench') {
             state.bench[origin.slot] = occupant;
-            const op = benchSlotCenter(origin.slot);
-            occContainer.x = op.x; occContainer.y = op.y;
+            placeUnitContainer(occContainer, { kind: 'bench', slot: origin.slot });
         } else {
             state.boardPlace(origin.col, origin.row, occupant);
-            const op = gridToWorld(origin.col, origin.row, 'p1');
-            occContainer.x = op.x; occContainer.y = op.y;
+            placeUnitContainer(occContainer, { kind: 'board', col: origin.col, row: origin.row, side: 'p1' });
         }
     }
 }
@@ -311,10 +567,8 @@ function tryPlaceOnBench(container, unit, origin, slot) {
 function startActionPhase() {
     if (state.phase === 'combat') return;
     state.phase = 'combat';
-
-    // Lock dragging on all player units
-    containers.forEach(c => { if (c.input) c.disableInteractive(); });
-
+    // Drag is gated on state.phase === 'planning' in the pointer pipeline,
+    // so flipping phase is the lock — no per-unit setInteractive cleanup needed.
     spawnEnemyTeam();
 
     combatTimer = phaserScene.time.addEvent({
@@ -325,15 +579,14 @@ function startActionPhase() {
 function spawnEnemyTeam() {
     enemies = [];
     const allIds = Object.keys(CHARACTERS);
-    // Match the player's deployed count, capped at 3 for round 1.
-    const enemyCount = Math.max(1, Math.min(state.boardCount() + 1, 7));
+    const enemyCount = Math.max(1, Math.min(state.boardCount() + 1, BOARD.COLS * BOARD.ROWS));
     for (let i = 0; i < enemyCount; i++) {
         const charId = allIds[Math.floor(Math.random() * allIds.length)];
         const col = i % BOARD.COLS;
         const row = Math.floor(i / BOARD.COLS);
         const unit = makeUnit(charId, true);
-        const pos = gridToWorld(col, row, 'p2');
-        const c = createUnitContainer(phaserScene, unit, pos.x, pos.y);
+        const c = createUnitContainer(phaserScene, unit);
+        placeUnitContainer(c, { kind: 'board', col, row, side: 'p2' });
         enemies.push(c);
     }
 }
@@ -407,7 +660,7 @@ function endCombat(won) {
         const u = c.getData('unit');
         u.currentHp = u.maxHp;
         updateHpBar(c);
-        c.setInteractive({ draggable: true });
+        // Drag re-enables automatically when state.phase flips back to 'planning'.
     });
     deadUids.forEach(uid => {
         const loc = findUnitLocation(uid);
@@ -479,6 +732,57 @@ function updateSynergyPanel() {
         }
         unitList.innerHTML = html;
     }
+}
+
+// ===========================================================================
+// SYNERGY BADGES (on-unit indicator)
+// ===========================================================================
+// A unit's badge lights up when at least one of its style or work tags has
+// ≥ SYNERGY_ACTIVE_THRESHOLD distinct contributors on the player's board.
+// Color is the unit's STYLE color when the style is active; otherwise white
+// (work-only contributor). Cheap to compute and runs on every 'board' event.
+const SYNERGY_ACTIVE_THRESHOLD = 2;
+
+function computeActiveSynergies() {
+    const styleCounts = {};
+    const workCounts  = {};
+    const seen = new Set();
+    state.board.forEach(row => row.forEach(u => {
+        if (!u || seen.has(u.charId)) return;
+        seen.add(u.charId);
+        const d = CHARACTERS[u.charId];
+        styleCounts[d.style] = (styleCounts[d.style] || 0) + 1;
+        d.work.forEach(w => workCounts[w] = (workCounts[w] || 0) + 1);
+    }));
+    const activeStyles = new Set(
+        Object.keys(styleCounts).filter(k => styleCounts[k] >= SYNERGY_ACTIVE_THRESHOLD)
+    );
+    const activeWorks  = new Set(
+        Object.keys(workCounts).filter(k => workCounts[k] >= SYNERGY_ACTIVE_THRESHOLD)
+    );
+    return { activeStyles, activeWorks };
+}
+
+function refreshSynergyBadges() {
+    const { activeStyles, activeWorks } = computeActiveSynergies();
+    containers.forEach(c => {
+        const unit = c.getData('unit');
+        if (!unit || unit.isEnemy) return;
+        const badge = c.getData('badge');
+        if (!badge) return;
+        const data = CHARACTERS[unit.charId];
+        const styleActive = activeStyles.has(data.style);
+        const workActive  = data.work.some(w => activeWorks.has(w));
+        const loc = findUnitLocation(unit.uid);
+        const onBoard = loc && loc.kind === 'board';
+        if (onBoard && (styleActive || workActive)) {
+            const color = styleActive ? (STYLE_COLORS[data.style] || 0xffffff) : 0xffffff;
+            paintSynergyBadge(badge, color);
+            badge.setVisible(true);
+        } else {
+            badge.setVisible(false);
+        }
+    });
 }
 
 // ===========================================================================
@@ -585,6 +889,7 @@ state.subscribe((event) => {
     }
     if (event.type === 'board') {
         updateSynergyPanel();
+        refreshSynergyBadges();
     }
 });
 
