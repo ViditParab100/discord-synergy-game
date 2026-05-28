@@ -35,6 +35,48 @@ const COST_COLORS = {
 };
 const COST_CSS = { 1:'#9aa0a6', 2:'#51cf66', 3:'#4dabf7', 4:'#b197fc', 5:'#ffd43b' };
 
+// CSS color per synergy — used to tint the icon chip in the side panel, the
+// opponent panel, and the unit info zone so each synergy is visually distinct
+// even before art lands.
+const STYLE_CSS = {
+    "Strategist":     "#fcc419",
+    "Solidarity":     "#4dabf7",
+    "Disciplinarian": "#ff6b6b",
+    "Friendly":       "#51cf66",
+    "Survivalist":    "#cc5de8",
+    "Hard Hitter":    "#ff922b",
+    "Researcher":     "#20c997"
+};
+const WORK_CSS = {
+    "Trader":        "#fcd34d",
+    "Killer":        "#ef4444",
+    "Mentor":        "#06b6d4",
+    "Leader":        "#fbbf24",
+    "Avenger":       "#a855f7",
+    "Coder":         "#10b981",
+    "Recruiter":     "#ec4899",
+    "OutdoorPerson": "#84cc16"
+};
+
+// Build an icon chip for a synergy. Tries to load
+//   client/assets/synergies/{styles|works}/<safeName>.png
+// and falls back to the SYMBOLS emoji if the PNG 404s (onerror swap). The
+// chip background uses the synergy's color at low alpha so the synergy is
+// identifiable at a glance even when no art is present.
+function synergyIconHtml(name, isStyle) {
+    const emoji   = isStyle ? (SYMBOLS.styles[name] || '?')
+                            : (SYMBOLS.work[name] || '?');
+    const color   = (isStyle ? STYLE_CSS[name] : WORK_CSS[name]) || '#666';
+    const folder  = isStyle ? 'styles' : 'works';
+    const safe    = name.replace(/\s+/g, '_');
+    const src     = `assets/synergies/${folder}/${safe}.png`;
+    // 33 = ~20% alpha appended to the 6-digit hex (CSS hex8 notation).
+    const bg = color + '33';
+    return `<span class="syn-icon" style="background:${bg}; box-shadow:inset 0 0 0 1px ${color}55;">`
+         + `<img src="${src}" alt="" onerror="this.outerHTML=&quot;${emoji}&quot;;" />`
+         + `</span>`;
+}
+
 // ===========================================================================
 // STATE (single source of truth)
 // ===========================================================================
@@ -47,23 +89,31 @@ let combatTimer = null;
 let enemies = [];               // Phaser containers for the enemy team
 
 function makeUnit(charId, isEnemy = false) {
-    const charData = CHARACTERS[charId];
-    return {
+    const u = {
         uid: nextUid++,
         charId,
         stars: 1,
-        currentHp: charData.baseStats.hp,
-        maxHp: charData.baseStats.hp,
+        currentHp: 0,
+        maxHp: 0,
         abilityCharge: 0,
+        attackCooldown: 0,
         isEnemy
     };
+    const stats = getScaledStats(u);   // single source of truth (HP_BOOST included)
+    u.maxHp = stats.hp;
+    u.currentHp = stats.hp;
+    return u;
 }
 
 // Stats scale geometrically with star tier: 1★=1×, 2★=1.8×, 3★=3.24×.
 // Combat reads these instead of CHARACTERS[charId].baseStats so star upgrades
 // actually mean something. maxHp/currentHp are stored on the unit and updated
 // on merge so HP bars stay consistent.
+//
+// HP_BOOST is a global HP multiplier — applied here so it covers makeUnit,
+// merges, resurrections, and enemy spawns automatically. Tune for fight pace.
 const STAR_STAT_MULT = 1.8;
+const HP_BOOST       = 1.5;
 function starMultiplier(stars) {
     return Math.pow(STAR_STAT_MULT, (stars | 0) - 1);
 }
@@ -71,7 +121,7 @@ function getScaledStats(unit) {
     const base = CHARACTERS[unit.charId].baseStats;
     const m = starMultiplier(unit.stars);
     return {
-        hp:           Math.floor(base.hp * m),
+        hp:           Math.floor(base.hp * m * HP_BOOST),
         attack:       Math.floor(base.attack * m),
         armor:        Math.floor(base.armor * m),
         abilityPower: Math.floor(base.abilityPower * m)
@@ -845,8 +895,8 @@ function updateInfoZone(unit) {
     _lastInfoUid = unit.uid;
 
     const data  = CHARACTERS[unit.charId];
-    const sIcon = SYMBOLS.styles[data.style] || '';
-    const wTags = data.work.map(w => `${SYMBOLS.work[w] || ''} ${w}`).join(' · ');
+    const sIcon = synergyIconHtml(data.style, true);
+    const wTags = data.work.map(w => `${synergyIconHtml(w, false)} ${w}`).join(' · ');
     const stars = '★'.repeat(unit.stars || 1);
     const stats = getScaledStats(unit);
     const cost  = data.cost;
@@ -1243,15 +1293,14 @@ function unitAttackSpeed(unit) {
     return (typeof STYLE_ATTACK_SPEED !== 'undefined' && STYLE_ATTACK_SPEED[data.style]) || 1.0;
 }
 
-// Tick a caster's charge after their normal attack. Mana fills by the unit's
-// attackSpeed (Hard Hitters fill quickest, Survivalists slowest). When the
-// bar tops out, fire the handler and reset. Silently no-ops for characters
-// without `ability`.
+// Tick a caster's mana after a basic attack. Mana fills +1 per attack now
+// that attack RATE itself differs per unit — the speed advantage is already
+// expressed in how often this function runs.
 function tryCastAbility(scene, attacker, allies, enemies) {
     const u   = attacker.getData('unit');
     const def = CHARACTERS[u.charId].ability;
     if (!def) return;
-    u.abilityCharge = (u.abilityCharge || 0) + unitAttackSpeed(u);
+    u.abilityCharge = (u.abilityCharge || 0) + 1;
     updateManaBar(attacker);
     if (u.abilityCharge < (def.chargeMax || 3)) return;
     u.abilityCharge = 0;
@@ -1265,6 +1314,16 @@ function tryCastAbility(scene, attacker, allies, enemies) {
 // ===========================================================================
 // COMBAT
 // ===========================================================================
+// Each unit attacks at its own natural cadence: base interval = 1500ms,
+// individual interval = BASE_ATTACK_INTERVAL_MS / unitAttackSpeed(unit).
+// So a Hard Hitter (1.30) swings every ~1154ms and a Survivalist (0.85)
+// every ~1765ms. We run a fast 250ms global tick that just decrements each
+// unit's cooldown; only units whose cooldown hits zero actually attack on
+// that tick. Mana fills +1 per attack — the speed differentiation is now
+// expressed in attack rate, not mana gain.
+const COMBAT_TICK_MS         = 250;
+const BASE_ATTACK_INTERVAL_MS = 1500;
+
 function startActionPhase() {
     if (state.phase === 'combat') return;
     state.phase = 'combat';
@@ -1273,7 +1332,7 @@ function startActionPhase() {
     spawnEnemyTeam();
 
     combatTimer = phaserScene.time.addEvent({
-        delay: 1500, loop: true, callback: combatTick
+        delay: COMBAT_TICK_MS, loop: true, callback: combatTick
     });
 }
 
@@ -1345,6 +1404,11 @@ function combatTick() {
     [...playerUnits, ...liveEnemies].forEach(attacker => {
         if (!attacker.active) return;
         const aUnit = attacker.getData('unit');
+
+        // Decrement personal cooldown; only attack when it's elapsed.
+        aUnit.attackCooldown = (aUnit.attackCooldown || 0) - COMBAT_TICK_MS;
+        if (aUnit.attackCooldown > 0) return;
+
         const pool = aUnit.isEnemy ? playerUnits.filter(c => c.active)
                                    : liveEnemies.filter(c => c.active);
         if (pool.length === 0) return;
@@ -1361,6 +1425,10 @@ function combatTick() {
         const tStats = tUnit.isEnemy ? getScaledStats(tUnit) : computeCombatStats(tUnit, syn);
         const damage = Math.max(5, aStats.attack - tStats.armor / 2);
         tUnit.currentHp -= damage;
+
+        // Reset attack cooldown — faster units (attackSpeed > 1) get shorter
+        // cooldowns and thus more swings per fight.
+        aUnit.attackCooldown = BASE_ATTACK_INTERVAL_MS / unitAttackSpeed(aUnit);
 
         // Laser beam VFX
         const laser = phaserScene.add.graphics();
@@ -1431,6 +1499,7 @@ function endCombat(won) {
         const u = c.getData('unit');
         u.currentHp = u.maxHp;
         u.abilityCharge = 0;       // reset cast meter between rounds
+        u.attackCooldown = 0;      // ready to swing immediately next round
         updateHpBar(c);
         updateManaBar(c);
         c.setVisible(true);
@@ -1462,7 +1531,7 @@ function endCombat(won) {
     applyRoundStartSynergyEconomy();
     state.rollShop(CHARACTERS);
     renderShop();
-    if (won) flashMessage('Round won.');
+    if (won) flashMessage(`Round won. +${ECONOMY.WIN_BONUS}g`);
     else     flashMessage(`Round lost. -${lossDamage} HP`);
 
     const fightBtn = document.getElementById('start-fight-btn');
@@ -1487,8 +1556,9 @@ function updateSynergyPanel() {
     const tierStars = (tier) => '★'.repeat(tier + 1); // tier 0 → ★, tier 1 → ★★, tier 2 → ★★★
 
     // Render a single synergy row. Inactive synergies (tier < 0) are dimmed so
-    // the player can see what they're working toward.
-    function renderRow(name, icon, info, def) {
+    // the player can see what they're working toward. The ability description
+    // is in a .syn-desc child that's hidden by default — CSS reveals on hover.
+    function renderRow(name, info, def, isStyle) {
         const next  = def.thresholds.find(t => t > info.count);
         const stars = info.tier >= 0 ? tierStars(info.tier) : '';
         const color = info.tier >= 0 ? '#ffd43b' : '#888';
@@ -1496,27 +1566,25 @@ function updateSynergyPanel() {
         const globalTag = def.global && info.tier >= 0
             ? ` <span style="color:#ff922b;font-weight:bold">COMMAND</span>`
             : '';
-        // Show the ability description for the unlocked tier (or the very next
-        // tier's preview when this synergy is still dim).
         const descTier = info.tier >= 0 ? info.tier : 0;
         const desc = (def.tierDesc && def.tierDesc[descTier]) || '';
-        const descColor = info.tier >= 0 ? '#9ae6b4' : '#5a5a66';
-        return `<div style="color:${color}; margin-bottom:4px">
-          <div>${icon} ${name} ${stars} <strong>${info.count}</strong>${nextStr}${globalTag}</div>
-          <div style="font-size:0.75em; color:${descColor}; padding-left:14px">${desc}</div>
+        const descColor = info.tier >= 0 ? '#9ae6b4' : '#aab';
+        return `<div class="syn-row" style="color:${color}">
+          <div class="syn-head">${synergyIconHtml(name, isStyle)} ${name} ${stars} <strong>${info.count}</strong>${nextStr}${globalTag}</div>
+          <div class="syn-desc" style="color:${descColor};">${desc}</div>
         </div>`;
     }
 
     const synPanel = document.querySelector('.p1-synergies');
     if (synPanel) {
-        let html = '<strong style="color:white; display:block; margin-bottom:5px;">Active Synergies</strong>';
+        let html = '<strong style="color:white; display:block; margin-bottom:5px;">Active Synergies <span style="color:#777; font-size:0.75em;">(hover row for ability)</span></strong>';
         let any = false;
         Object.keys(syn.styles).forEach(s => {
-            html += renderRow(s, SYMBOLS.styles[s] || '', syn.styles[s], SYNERGIES.styles[s]);
+            html += renderRow(s, syn.styles[s], SYNERGIES.styles[s], true);
             any = true;
         });
         Object.keys(syn.works).forEach(w => {
-            html += renderRow(w, SYMBOLS.work[w] || '', syn.works[w], SYNERGIES.works[w]);
+            html += renderRow(w, syn.works[w], SYNERGIES.works[w], false);
             any = true;
         });
         synPanel.innerHTML = any ? html : '<p style="color:#666;">No active synergies</p>';
@@ -1558,17 +1626,13 @@ function updateOpponentPanel(snapshot) {
     if (synPanel) {
         let html = '<strong style="color:white; display:block; margin-bottom:5px;">Opponent Synergies</strong>';
         let any = false;
-        const row = (name, icon, info) => {
+        const row = (name, info, isStyle) => {
             const stars = info.tier >= 0 ? '★'.repeat(info.tier + 1) : '';
             const color = info.tier >= 0 ? '#ff8a8a' : '#888';
-            return `<div style="color:${color}">${icon} ${name} ${stars} <strong>${info.count}</strong></div>`;
+            return `<div style="color:${color}">${synergyIconHtml(name, isStyle)} ${name} ${stars} <strong>${info.count}</strong></div>`;
         };
-        Object.keys(syn.styles).forEach(s => {
-            html += row(s, SYMBOLS.styles[s] || '', syn.styles[s]); any = true;
-        });
-        Object.keys(syn.works).forEach(w => {
-            html += row(w, SYMBOLS.work[w] || '', syn.works[w]); any = true;
-        });
+        Object.keys(syn.styles).forEach(s => { html += row(s, syn.styles[s], true);  any = true; });
+        Object.keys(syn.works).forEach(w  => { html += row(w, syn.works[w], false); any = true; });
         synPanel.innerHTML = any ? html : '<p style="color:#666;">No active synergies</p>';
     }
 
