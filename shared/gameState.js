@@ -183,9 +183,13 @@
     capForLevel() { return this.level; } // 1 unit deployable per level
 
     // ------------- xp / level -------------
-    buyXp() {
+    // Caller passes the actual price (may be discounted by Researcher synergy).
+    // Defaults to the un-discounted ECONOMY.XP_PURCHASE_COST so legacy callers
+    // and tests still work.
+    buyXp(cost) {
       if (this.level >= 10) return false;
-      if (!this.spendGold(ECONOMY.XP_PURCHASE_COST, 'xp')) return false;
+      const price = cost == null ? ECONOMY.XP_PURCHASE_COST : Math.max(1, cost);
+      if (!this.spendGold(price, 'xp')) return false;
       this.xp += ECONOMY.XP_PER_PURCHASE;
       while (this.level < 10 && this.xp >= (XP_TO_LEVEL[this.level + 1] || Infinity)) {
         this.xp -= XP_TO_LEVEL[this.level + 1];

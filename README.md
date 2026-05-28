@@ -86,7 +86,7 @@ discord-synergy-game/
 | Interest | +1g per 10g banked (cap +5g) |
 | Win/loss streak | +1/+2/+3g at streak length 2/3/4+ |
 | Reroll shop | 2g (free if Recruiter synergy is active) |
-| Buy XP | 4g for 4 XP |
+| Buy XP | 4g for 4 XP (−1g with 2 Researchers, −2g with 4) — button label shows `Next Lvl: Ng` total to next level |
 | Lose a round | Scales with surviving enemies: `2 + Σ max(1, ⌊(stars+cost)·hpRatio/2⌋)` |
 | Trader synergy | +2g/round (≥2) or +5g/round (≥4) |
 | Recruiter synergy | 1/2/3 free rerolls/round at ≥2 / ≥3 / ≥4 |
@@ -139,7 +139,7 @@ Each synergy declares thresholds, per-tier stat buffs, and a human-readable desc
 | Synergy | Thresholds | Effect |
 |---|---|---|
 | Strategist | 2 / 4 | +10% / +25% attack (Strategists) |
-| Researcher | 2 / 4 | +15% / +35% AP (Researchers) |
+| Researcher | 2 / 4 | +15% / +35% AP (Researchers) · **XP cost −1g / −2g** |
 | Disciplinarian | 2 / 4 | +30% / +60% armor (Disciplinarians) |
 | Friendly | 2 / 4 | +10% / +25% AP (Friendly) |
 | Survivalist | 2 / 4 | +20% / +45% HP (Survivalists) |
