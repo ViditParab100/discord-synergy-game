@@ -35,6 +35,6 @@
     "MarmotMenace":   { "portrait": "portraits/MarmotMenace.png" },
     "Leandra":        { "portrait": "portraits/Leandra.png" },
 
-    "NeonVader":      { "portrait": "portraits/NeonVader.png" }
+    "JNRanger":       { "portrait": "portraits/JNRanger.png" }
   }
 }

@@ -210,8 +210,8 @@ const CHARACTERS = {
     // ==========================================
     // 5g LEGENDARY TIER  (dual-work champions, rare drops at high level)
     // ==========================================
-    NeonVader: {
-        id: "neonvader", displayName: "NeonVader",
+    JNRanger: {
+        id: "jnranger", displayName: "JNRanger",
         style: "Strategist", work: ["Coder", "Leader"],
         cost: 5, baseStats: { hp: 1100, attack: 110, armor: 55, abilityPower: 160 },
         ability: { id: "chain_zap", chargeMax: 2 }
@@ -253,29 +253,48 @@ const SYMBOLS = {
 // `economy: [...]` (Trader, Recruiter) declares round-start economy effects
 // applied by applyRoundStartSynergyEconomy in game.js.
 // ---------------------------------------------------------------------------
+// `tierDesc[i]` is the human-readable ability description shown in the side
+// panel and the hover info zone. The multiplier numbers in `buffs` and the
+// values in `economy` are what combat / round transitions actually read; the
+// text is informational so designers can iterate copy without touching logic.
 const SYNERGIES = {
     styles: {
-        "Strategist":     { thresholds: [2, 4], buffs: [{ atk: 1.10 }, { atk: 1.25 }] },
-        "Researcher":     { thresholds: [2, 4], buffs: [{ ap: 1.15 }, { ap: 1.35 }] },
-        "Disciplinarian": { thresholds: [2, 4], buffs: [{ armor: 1.30 }, { armor: 1.60 }] },
-        "Friendly":       { thresholds: [2, 4], buffs: [{ ap: 1.10 }, { ap: 1.25 }] },
-        "Survivalist":    { thresholds: [2, 4], buffs: [{ hp: 1.20 }, { hp: 1.45 }] },
-        "Solidarity":     { thresholds: [2, 4], buffs: [{ armor: 1.15 }, { armor: 1.35 }] },
-        "Hard Hitter":    { thresholds: [2, 4], buffs: [{ atk: 1.20 }, { atk: 1.45 }] }
+        "Strategist":     { thresholds: [2, 4], buffs: [{ atk: 1.10 }, { atk: 1.25 }],
+                            tierDesc: ["+10% attack to Strategists", "+25% attack, smart targeting"] },
+        "Researcher":     { thresholds: [2, 4], buffs: [{ ap: 1.15 }, { ap: 1.35 }],
+                            tierDesc: ["+15% AP to Researchers", "+35% AP, abilities charge faster"] },
+        "Disciplinarian": { thresholds: [2, 4], buffs: [{ armor: 1.30 }, { armor: 1.60 }],
+                            tierDesc: ["+30% armor to Disciplinarians", "+60% armor, debuff resistance"] },
+        "Friendly":       { thresholds: [2, 4], buffs: [{ ap: 1.10 }, { ap: 1.25 }],
+                            tierDesc: ["+10% AP, heal on cast", "+25% AP, bigger team heal"] },
+        "Survivalist":    { thresholds: [2, 4], buffs: [{ hp: 1.20 }, { hp: 1.45 }],
+                            tierDesc: ["+20% HP to Survivalists", "+45% HP, slow regen"] },
+        "Solidarity":     { thresholds: [2, 4], buffs: [{ armor: 1.15 }, { armor: 1.35 }],
+                            tierDesc: ["+15% armor, starting shield", "+35% armor, larger shield"] },
+        "Hard Hitter":    { thresholds: [2, 4], buffs: [{ atk: 1.20 }, { atk: 1.45 }],
+                            tierDesc: ["+20% attack to Hard Hitters", "+45% attack, crit chance"] }
     },
     works: {
         "Trader":        { thresholds: [2, 4],    buffs: [{ }, { }],
-                           economy: [{ goldPerRound: 2 }, { goldPerRound: 5 }] },
-        "Killer":        { thresholds: [2, 4],    buffs: [{ atk: 1.10 }, { atk: 1.25 }] },
-        "Mentor":        { thresholds: [2, 3, 4], buffs: [{ ap: 1.15 }, { ap: 1.25 }, { ap: 1.40 }] },
+                           economy: [{ goldPerRound: 2 }, { goldPerRound: 5 }],
+                           tierDesc: ["+2g income per round", "+5g income per round"] },
+        "Killer":        { thresholds: [2, 4],    buffs: [{ atk: 1.10 }, { atk: 1.25 }],
+                           tierDesc: ["+10% attack, execute low-HP enemies", "+25% attack, bigger execute window"] },
+        "Mentor":        { thresholds: [2, 3, 4], buffs: [{ ap: 1.15 }, { ap: 1.25 }, { ap: 1.40 }],
+                           tierDesc: ["+15% AP team-wide", "+25% AP team-wide", "+40% AP team-wide"] },
         // Leader is a global command aura — boosts every unit on the board.
         "Leader":        { thresholds: [2, 4],    buffs: [{ atk: 1.10, armor: 1.10 }, { atk: 1.25, armor: 1.25 }],
-                           global: true },
-        "Avenger":       { thresholds: [2, 4],    buffs: [{ atk: 1.12 }, { atk: 1.30 }] },
-        "Coder":         { thresholds: [2, 4],    buffs: [{ ap: 1.20 }, { ap: 1.40 }] },
+                           global: true,
+                           tierDesc: ["COMMAND: +10% atk & armor whole team", "COMMAND: +25% atk & armor whole team"] },
+        "Avenger":       { thresholds: [2, 4],    buffs: [{ atk: 1.12 }, { atk: 1.30 }],
+                           tierDesc: ["+12% attack, vengeance on ally death", "+30% attack, fierce vengeance"] },
+        "Coder":         { thresholds: [2, 4],    buffs: [{ ap: 1.20 }, { ap: 1.40 }],
+                           tierDesc: ["+20% AP, attack chains to one extra enemy", "+40% AP, attacks chain twice"] },
         "Recruiter":     { thresholds: [2, 3, 4], buffs: [{ }, { }, { }],
-                           economy: [{ extraReroll: 1 }, { extraReroll: 2 }, { extraReroll: 3 }] },
-        "OutdoorPerson": { thresholds: [2, 4],    buffs: [{ atk: 1.10 }, { atk: 1.25 }] }
+                           economy: [{ extraReroll: 1 }, { extraReroll: 2 }, { extraReroll: 3 }],
+                           tierDesc: ["1 free shop reroll per round", "2 free rerolls per round", "3 free rerolls per round"] },
+        "OutdoorPerson": { thresholds: [2, 4],    buffs: [{ atk: 1.10 }, { atk: 1.25 }],
+                           tierDesc: ["+10% attack, scout enemy positions", "+25% attack, ranged advantage"] }
     }
 };
 

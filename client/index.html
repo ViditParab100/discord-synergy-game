@@ -24,7 +24,7 @@
         <aside class="side-panel left-panel">
             <div class="player-profile">
                 <img src="placeholder-avatar.png" alt="P1" class="avatar">
-                <h3>NeonVader (You)</h3>
+                <h3>JNRanger (You)</h3>
                 <div class="health-bar"><div class="health-fill" style="width: 100%;">100</div></div>
             </div>
             
@@ -59,24 +59,37 @@
         </aside>
 
         <footer class="shop-container">
-            <div class="shop-header">
-                <span>Shop</span>
-                <button class="refresh-btn">🔄 Refresh (2g)</button>
+            <div class="shop-block">
+                <div class="shop-header">
+                    <span>Shop</span>
+                    <button class="refresh-btn">🔄 Refresh (2g)</button>
+                </div>
+                <div class="shop-cards">
+                    <div class="card coder-theme"><p>Star_Vader</p><p>3g</p></div>
+                    <div class="card trader-theme"><p>RockStarDad</p><p>2g</p></div>
+                    <div class="card killer-theme"><p>Binkly</p><p>4g</p></div>
+                    <div class="card empty-slot"></div>
+                    <div class="card empty-slot"></div>
+                </div>
             </div>
-            <div class="shop-cards">
-                <div class="card coder-theme"><p>Star_Vader</p><p>3g</p></div>
-                <div class="card trader-theme"><p>RockStarDad</p><p>2g</p></div>
-                <div class="card killer-theme"><p>Binkly</p><p>4g</p></div>
-                <div class="card empty-slot"></div>
-                <div class="card empty-slot"></div>
-            </div>
+            <aside class="info-zone">
+                <div class="info-zone-title">UNIT INFO</div>
+                <div class="info-zone-body" id="info-zone-body">
+                    <p style="color:#666; font-size:0.85em;">Hover a card to see details.</p>
+                </div>
+            </aside>
         </footer>
 
     </div>
     <script src="https://cdn.jsdelivr.net/npm/phaser@3.60.0/dist/phaser.min.js"></script>
+    <!-- socket.io client. Served by the Node server (server/index.js) at this
+         path automatically. If we're being served by Live Server instead
+         (single-player dev), this 404s harmlessly and net.js falls back. -->
+    <script src="/socket.io/socket.io.js"></script>
     <script src="../shared/dictionary.js"></script>
     <script src="../shared/gameState.js"></script>
     <script src="../shared/coords.js"></script>
+    <script src="net.js"></script>
     <script src="game.js"></script>
 </body>
 </html>
