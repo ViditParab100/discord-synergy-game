@@ -186,6 +186,49 @@ body {
     border-top: 1px dashed #444;
 }
 
+/* Synergy panel rows — description shown only on hover so the panel stays
+   uncluttered at a glance. */
+.syn-row {
+    padding: 2px 4px;
+    margin-bottom: 2px;
+    border-radius: 3px;
+    cursor: default;
+    transition: background 0.12s ease;
+}
+.syn-row:hover {
+    background: rgba(255, 255, 255, 0.06);
+}
+.syn-row .syn-desc {
+    display: none;
+    font-size: 0.72em;
+    margin-left: 26px;
+    margin-top: 2px;
+    line-height: 1.3;
+}
+.syn-row:hover .syn-desc {
+    display: block;
+}
+
+/* Synergy icon chip — colored background tints by synergy. PNG sits inside;
+   emoji fallback (via img onerror) inherits the chip's text color. */
+.syn-icon {
+    display: inline-flex;
+    align-items: center;
+    justify-content: center;
+    width: 20px;
+    height: 20px;
+    border-radius: 4px;
+    margin-right: 4px;
+    font-size: 12px;
+    line-height: 1;
+    vertical-align: middle;
+}
+.syn-icon img {
+    max-width: 18px;
+    max-height: 18px;
+    display: block;
+}
+
 .shop-header {
     text-align: center;
     font-weight: bold;

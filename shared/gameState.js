@@ -24,6 +24,7 @@
     INTEREST_PER: 10,         // +1g per 10g held
     MAX_INTEREST: 5,
     STREAK_BONUS: [0, 0, 1, 2, 3], // index = streak length (capped at 4+)
+    WIN_BONUS: 2,             // flat gold for winning a round
     REROLL_COST: 2,
     XP_PURCHASE_COST: 4,
     XP_PER_PURCHASE: 4,
@@ -220,6 +221,7 @@
       if (won) {
         this.streak = this.streakKind === 'win' ? this.streak + 1 : 1;
         this.streakKind = 'win';
+        this.addGold(ECONOMY.WIN_BONUS, 'win');
       } else {
         this.streak = this.streakKind === 'loss' ? this.streak + 1 : 1;
         this.streakKind = 'loss';

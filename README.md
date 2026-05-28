@@ -11,7 +11,7 @@ A custom, web-based auto-battler designed to live inside Discord via the Embedde
 * **Live synergy tracking.** Every style and work tag has activation thresholds, per-tier buff multipliers, and human-readable ability descriptions. The side panel shows tier (★ / ★★ / ★★★), current count, and what the next threshold unlocks.
 * **3-star merge.** Owning 3 of the same character at the same star tier auto-merges into one unit a star higher. Cascades — 9× 1★ → 1× 3★ from a single buy. Stats scale 1.8× per star.
 * **Sell zone.** Drag any unit onto the red SELL panel for a 1×/3×/9× cost refund by star tier.
-* **Per-unit mana + abilities.** Every character has an ability. A cyan mana bar between the HP track and the portrait fills with each basic attack; the fill rate scales with the unit's style (Hard Hitters fastest, Survivalists slowest). At full mana the matching handler fires (chain lightning, cleave, AOE blast, heal aura, team rally, shield, slow). All damage/healing scales by the caster's scaled `abilityPower`, so 1g abilities chip while 5g abilities swing rounds.
+* **Per-unit mana + abilities + attack speed.** Every character has an ability. A cyan mana bar between the HP track and the portrait fills +1 per basic attack. Each unit also has its **own attack cooldown** driven by its style's `attackSpeed` — Hard Hitters swing roughly 1.5× as fast as Survivalists, so they cast more often per second naturally. At full mana the matching handler fires (chain lightning, cleave, AOE blast, heal aura, team rally, shield, slow). All damage/healing scales by the caster's scaled `abilityPower`, so 1g abilities chip while 5g abilities swing rounds.
 * **Gold economy.** Round income + interest + win/loss streak bonuses + paid rerolls + XP purchasing + Trader synergy bonus + Recruiter free rerolls.
 * **Resurrection.** Dead player units come back to full HP at round end. Round loss damage scales with surviving enemies' stars, cost, and HP percentage.
 * **Hover info zone.** Hover any of your cards (board or bench) and the footer info zone shows name, cost, star tier, full scaled stats, and ability cadence.
@@ -34,7 +34,10 @@ discord-synergy-game/
 │   ├── net.js                  # socket.io-client wrapper (Net.init/send/on/connected/matched/slot)
 │   └── assets/
 │       ├── manifest.json       # charId → portrait path registry
-│       └── portraits/          # Drop 96×96 PNGs here, named after the charId from dictionary.js
+│       ├── portraits/          # Drop 96×96 PNGs here, named after the charId from dictionary.js
+│       └── synergies/
+│           ├── styles/         # Drop synergy icon PNGs here, named after style (e.g. Hard_Hitter.png)
+│           └── works/          # Drop synergy icon PNGs here, named after work (e.g. OutdoorPerson.png)
 ├── shared/
 │   ├── dictionary.js           # CHARACTERS + SYMBOLS + SYNERGIES (thresholds, buffs, tierDesc, economy)
 │   ├── gameState.js            # GameState + ECONOMY + DROP_RATES + XP_TO_LEVEL
@@ -85,6 +88,7 @@ discord-synergy-game/
 | Round income | +5g base |
 | Interest | +1g per 10g banked (cap +5g) |
 | Win/loss streak | +1/+2/+3g at streak length 2/3/4+ |
+| Win bonus | +2g flat for winning the round |
 | Reroll shop | 2g (free if Recruiter synergy is active) |
 | Buy XP | 4g for 4 XP (−1g with 2 Researchers, −2g with 4) — button label shows `Next Lvl: Ng` total to next level |
 | Lose a round | Scales with surviving enemies: `2 + Σ max(1, ⌊(stars+cost)·hpRatio/2⌋)` |
@@ -251,16 +255,21 @@ Ability registry: `single_strike` (1g burst) · `cleave` (2-target sweep) · `ch
 ### ✅ Phase 5 — Mana Update (DONE)
 - [x] **Every character has an ability** (1g → weak, 4g → strong, 5g → strongest). 8 ability ids cover the roster: `single_strike`, `cleave`, `chain_zap`, `aoe_blast`, `heal_aura`, `team_buff`, `shield_ally`, `slow_enemy`. All damage/healing scales by the caster's scaled `abilityPower`, so power tracks cost AND star tier automatically.
 - [x] **Mana bar** on every card — cyan rectangle between the HP bar (top) and the portrait (middle). Width = `abilityCharge / ability.chargeMax`. Resets to 0 at round end.
-- [x] **Attack speed** (style-derived) controls fill rate. After each basic attack the unit's `abilityCharge` increases by `STYLE_ATTACK_SPEED[style]`. Hard Hitters fill fastest (1.30), Survivalists slowest (0.85). Same combat tick interval — only the per-attack mana gain varies.
-- [x] **`chargeMax` by cost tier:** 1g = 5, 2g = 4, 3g = 4, 4g = 3, 5g = 2. Combined with style attack speed this gives a wide spread of cast cadences.
+- [x] **Per-unit attack cooldown.** Combat now ticks every **250ms** (was 1500ms). Each unit carries an `attackCooldown` that decrements every tick; it only swings when the cooldown elapses, then resets to `BASE_ATTACK_INTERVAL_MS / unitAttackSpeed(unit)`. So a Hard Hitter (1.30) swings every ~1154ms while a Survivalist (0.85) swings every ~1765ms — same loop, real speed differentiation.
+- [x] **Mana fills +1 per attack** (was += attackSpeed). The speed advantage is already in attack RATE — making mana also gain by attackSpeed double-counted.
+- [x] **`chargeMax` by cost tier:** 1g = 5, 2g = 4, 3g = 4, 4g = 3, 5g = 2. Combined with the cooldown system this gives a wide spread of cast cadences in seconds.
+- [x] **HP boost** — `HP_BOOST = 1.5` applied in `getScaledStats` so every unit has 50% more HP. Fights now last long enough for several casts on each side rather than ending in a couple of trades.
+- [x] **Win gold bonus** — `ECONOMY.WIN_BONUS = 2`. Flat +2g for winning, applied in `recordCombatResult` and shown on the win toast.
+- [x] **Hover-reveal synergy descriptions** — synergy panel rows are compact at idle (icon + name + tier + count). Ability text lives in a `.syn-desc` child shown only on `:hover` so the panel stays scannable.
+- [x] **Synergy icons** — `synergyIconHtml(name, isStyle)` returns a colored chip with an `<img>` tag pointing at `client/assets/synergies/{styles|works}/<Name>.png` and an `onerror` swap to the emoji. Background tint = `STYLE_CSS[name]` / `WORK_CSS[name]` at low alpha, so even with no art the synergy is identifiable by color. Drop PNGs (e.g. `Hard_Hitter.png`, `OutdoorPerson.png`) into the matching folder — no code change needed.
 
-| Cost | Example | Ability | chargeMax | Attacks-to-cast (Hard Hitter / Survivalist) |
+| Cost | Example | Ability | chargeMax | Seconds-to-cast (Hard Hitter / Survivalist) |
 |---|---|---|---:|---:|
-| 1g | RockStarDad | single_strike | 5 | 4 / 6 |
-| 2g | Lurio | cleave | 4 | 4 / 5 |
-| 3g | Star_Vader | chain_zap | 4 | 4 / 5 |
-| 4g | Spidernnam | chain_zap | 3 | 3 / 4 |
-| 5g | JNRanger | chain_zap | 2 | 2 / 3 |
+| 1g | RockStarDad | single_strike | 5 | 5.77 / 8.82 |
+| 2g | Lurio | cleave | 4 | 4.62 / 7.06 |
+| 3g | Star_Vader | chain_zap | 4 | 4.62 / 7.06 |
+| 4g | Spidernnam | chain_zap | 3 | 3.46 / 5.29 |
+| 5g | JNRanger | chain_zap | 2 | 2.31 / 3.53 |
 
 ### 💬 Phase 6 — Discord Integration
 - [ ] Wrap the final web app in the Discord Embedded App SDK for native channel play
