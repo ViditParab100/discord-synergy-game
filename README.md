@@ -234,16 +234,15 @@ Currently tagged: Star_Vader, Spidernnam, JNRanger → `chain_zap`; Binkly → `
 - [x] Loss damage scales with enemy survivors' stars/cost/HP
 - [x] Hover info zone in the footer
 
-### ✅ Phase 4 — Multiplayer (SCAFFOLD DONE)
+### ✅ Phase 4 — Multiplayer (DONE)
 - [x] Socket.io server with `GameRoom` (2-player slots, snapshot staging)
 - [x] Matchmaking: new connections slot into the first open room or create one
 - [x] FIGHT snapshot relay — both players send `submit_snapshot`, server broadcasts each side's board to the other as `opponent_snapshot`
 - [x] `spawnEnemyTeamFromSnapshot` mirrors the opponent's board onto the P2 grid (charId + stars preserved)
 - [x] Single-player fallback when no server is reachable
-- [x] `combat_result` relay (server side; client mirror UI deferred)
-- [ ] **Pending:** opponent HP / synergy panel mirror on the right side panel
-- [ ] **Pending:** spectator mode
-- [ ] **Pending:** server-authoritative combat (current model is client-authoritative — fine for friendlies, not cheat-proof)
+- [x] `combat_result` relay (server + client mirror)
+- [x] **Opponent panel mirror** on right side — HP bar, synergy tiers, deployed roster, slot label. Refreshes on every `opponent_snapshot` and `opponent_combat_result`; resets on `opponent_left`.
+- [x] `computeBoardSynergies(board)` extracted so both sides reuse the same aggregation logic.
 
 ### 💬 Phase 5 — Discord Integration
 - [ ] Wrap the final web app in the Discord Embedded App SDK for native channel play
@@ -254,6 +253,8 @@ Currently tagged: Star_Vader, Spidernnam, JNRanger → `chain_zap`; Binkly → `
 - [ ] Carousel rounds (shared loot phase)
 - [ ] Ranked ladder with seasonal resets
 - [ ] Per-synergy unique ability mechanics (currently only the buff numbers fire — the `tierDesc` text hints at richer behaviours like execute / smart targeting / crit that would replace simple multipliers)
+- [ ] **Spectator mode** — third+ connection joins a room as observer; server pushes both players' snapshots and HP updates to them.
+- [ ] **Server-authoritative combat** — port `combatTick` into `server/gameLogic.js`, broadcast per-tick state to both clients. Required for ranked / cheat-proof play. Current model is client-authoritative — fine for friendlies.
 
 ## 📝 Notes for Future Contributors
 

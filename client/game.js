@@ -96,14 +96,18 @@ function tierFor(count, thresholds) {
     return -1; // not active
 }
 
-function activeSynergies() {
+// Aggregate a board array into per-synergy {count, tier} info. Works against
+// our state.board (activeSynergies) and against an opponent's snapshot.board
+// (updateOpponentPanel) since the synergy math doesn't care whose board it is.
+function computeBoardSynergies(board) {
     const styleCounts = {};
     const workCounts  = {};
     const seen = new Set();
-    state.board.forEach(row => row.forEach(u => {
+    (board || []).forEach(row => (row || []).forEach(u => {
         if (!u || seen.has(u.charId)) return;
         seen.add(u.charId);
         const d = CHARACTERS[u.charId];
+        if (!d) return;
         styleCounts[d.style] = (styleCounts[d.style] || 0) + 1;
         d.work.forEach(w => workCounts[w] = (workCounts[w] || 0) + 1);
     }));
@@ -128,6 +132,8 @@ function activeSynergies() {
 
     return { styles, works };
 }
+
+function activeSynergies() { return computeBoardSynergies(state.board); }
 
 // Run at the start of every planning phase. Trader buys you extra income;
 // Recruiter banks free shop rerolls you can spend instead of gold. Both are
@@ -1378,6 +1384,86 @@ function updateSynergyPanel() {
 }
 
 // ===========================================================================
+// OPPONENT PANEL  (right side — multiplayer mirror)
+// ===========================================================================
+// Paints the same kind of synergy + roster info as the left panel but using
+// data we received from the server. Inputs:
+//   updateOpponentPanel(snapshot)  — paint after every opponent_snapshot
+//   setOpponentHp(hp)              — refresh after opponent_combat_result
+//   clearOpponentPanel()           — reset to "Waiting…" on opponent_left
+//   setOpponentName(label)         — header text
+function updateOpponentPanel(snapshot) {
+    if (!snapshot) { clearOpponentPanel(); return; }
+
+    if (typeof snapshot.playerHp === 'number') setOpponentHp(snapshot.playerHp);
+
+    const syn = computeBoardSynergies(snapshot.board);
+
+    const synPanel = document.querySelector('.p2-synergies');
+    if (synPanel) {
+        let html = '<strong style="color:white; display:block; margin-bottom:5px;">Opponent Synergies</strong>';
+        let any = false;
+        const row = (name, icon, info) => {
+            const stars = info.tier >= 0 ? '★'.repeat(info.tier + 1) : '';
+            const color = info.tier >= 0 ? '#ff8a8a' : '#888';
+            return `<div style="color:${color}">${icon} ${name} ${stars} <strong>${info.count}</strong></div>`;
+        };
+        Object.keys(syn.styles).forEach(s => {
+            html += row(s, SYMBOLS.styles[s] || '', syn.styles[s]); any = true;
+        });
+        Object.keys(syn.works).forEach(w => {
+            html += row(w, SYMBOLS.work[w] || '', syn.works[w]); any = true;
+        });
+        synPanel.innerHTML = any ? html : '<p style="color:#666;">No active synergies</p>';
+    }
+
+    const unitList = document.querySelector('.p2-unit-list');
+    if (unitList) {
+        const unique = new Map();
+        (snapshot.board || []).forEach(row => (row || []).forEach(u => {
+            if (!u) return;
+            const d = CHARACTERS[u.charId];
+            if (!d || unique.has(d.id)) return;
+            unique.set(d.id, { data: d, stars: u.stars || 1 });
+        }));
+        let html = '<strong style="color:white; display:block; margin-bottom:5px;">Opponent Roster</strong>';
+        if (unique.size === 0) {
+            html += '<p style="color:#666;">No units deployed.</p>';
+        } else {
+            unique.forEach(({ data, stars }) => {
+                const sIcon  = SYMBOLS.styles[data.style] || '';
+                const wIcons = data.work.map(w => SYMBOLS.work[w] || '').join('');
+                const stStr  = '<span style="color:#ffd43b;">' + '★'.repeat(stars) + '</span>';
+                html += `<div>${sIcon}${wIcons} <strong>${data.displayName}</strong> ${stStr}</div>`;
+            });
+        }
+        unitList.innerHTML = html;
+    }
+}
+
+function setOpponentHp(hp) {
+    const hpFill = document.querySelector('.right-panel .health-fill');
+    if (!hpFill) return;
+    const clamped = Math.max(0, hp | 0);
+    hpFill.style.width = clamped + '%';
+    hpFill.textContent = clamped;
+    state.opponentHp = clamped;
+}
+
+function clearOpponentPanel() {
+    setOpponentHp(100);
+    const synPanel = document.querySelector('.p2-synergies');
+    if (synPanel) synPanel.innerHTML = '<p style="color:#666;">Waiting for opponent...</p>';
+    const unitList = document.querySelector('.p2-unit-list');
+    if (unitList) unitList.innerHTML = '<p style="color:#666;">No units deployed.</p>';
+}
+
+function setOpponentName(label) {
+    const h = document.querySelector('.right-panel h3');
+    if (h) h.textContent = label;
+}
+
+// ===========================================================================
 // SYNERGY BADGES (on-unit indicator)
 // ===========================================================================
 // A unit's badge lights up when its style or any of its work tags has reached
@@ -1594,8 +1680,11 @@ document.addEventListener('DOMContentLoaded', () => {
         // Connect to the server. If unreachable we stay single-player.
         if (window.Net && typeof Net.init === 'function') {
             Net.init();
-            Net.on('opponent_snapshot', ({ snapshot }) => {
+            Net.on('opponent_snapshot', ({ snapshot, fromSlot }) => {
                 pendingOpponentSnapshot = snapshot;
+                // Paint opponent panel from this snapshot so the player sees
+                // the board they're about to fight against.
+                updateOpponentPanel(snapshot);
                 if (awaitingOpponent && fightBtn) {
                     awaitingOpponent = false;
                     fightBtn.style.display = 'none';
@@ -1604,17 +1693,34 @@ document.addEventListener('DOMContentLoaded', () => {
                     startActionPhase();
                 }
             });
+            Net.on('opponent_combat_result', (result) => {
+                if (typeof result.playerHp === 'number') setOpponentHp(result.playerHp);
+                if (typeof result.won === 'boolean') {
+                    // Opponent's win/loss is the inverse of how the round
+                    // played out for them — surface as a small toast.
+                    flashMessage(result.won ? 'Opponent won their round.' : 'Opponent lost their round.');
+                }
+            });
             Net.on('opponent_left', () => {
                 flashMessage('Opponent disconnected — back to single-player.');
                 pendingOpponentSnapshot = null;
+                clearOpponentPanel();
+                setOpponentName('Waiting…');
                 if (awaitingOpponent && fightBtn) {
                     awaitingOpponent = false;
                     fightBtn.disabled = false;
                     fightBtn.textContent = '⚔️ FIGHT!';
                 }
             });
-            Net.on('matched', () => flashMessage('Matched! Plan your board.'));
-            Net.on('joined', ({ slot }) => flashMessage(`Joined as ${slot}. Waiting for opponent…`));
+            Net.on('matched', (data) => {
+                flashMessage('Matched! Plan your board.');
+                const opp = data.players && data.players.find(p => p.slot !== Net.slot);
+                if (opp) setOpponentName(`Opponent (${opp.slot.toUpperCase()})`);
+            });
+            Net.on('joined', ({ slot }) => {
+                flashMessage(`Joined as ${slot}. Waiting for opponent…`);
+                setOpponentName('Waiting…');
+            });
         }
     }, 120);
 });
