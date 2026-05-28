@@ -161,6 +161,43 @@ function updateRefreshButton() {
         : `🔄 Refresh (2g)`;
 }
 
+// Researcher synergy discounts every XP purchase by 1g (tier 1) or 2g (tier 2).
+// Min price is clamped to 1g so XP can never be free.
+function computeXpCost() {
+    const syn = activeSynergies();
+    const r = syn.styles && syn.styles.Researcher;
+    let discount = 0;
+    if (r && r.tier >= 0) {
+        const econ = (SYNERGIES.styles.Researcher.economy || [])[r.tier];
+        if (econ && econ.xpDiscount) discount = econ.xpDiscount;
+    }
+    return Math.max(1, ECONOMY.XP_PURCHASE_COST - discount);
+}
+
+// Total gold needed to finish the player's current XP bar and hit the next
+// level — accounting for whatever Researcher discount is active right now.
+function computeNextLevelGold() {
+    if (state.level >= 10) return 0;
+    const xpForNext = (XP_TO_LEVEL[state.level + 1] || 0) - state.xp;
+    if (xpForNext <= 0) return 0;
+    const purchasesNeeded = Math.ceil(xpForNext / ECONOMY.XP_PER_PURCHASE);
+    return purchasesNeeded * computeXpCost();
+}
+
+function updateBuyXpButton() {
+    const btn = document.getElementById('buy-xp-btn');
+    if (!btn) return;
+    if (state.level >= 10) {
+        btn.textContent = 'MAX LEVEL';
+        btn.disabled = true;
+        return;
+    }
+    btn.disabled = false;
+    const cost = computeXpCost();
+    const nextLvl = computeNextLevelGold();
+    btn.textContent = `Buy XP (${cost}g) · Next Lvl: ${nextLvl}g`;
+}
+
 function computeCombatStats(unit, syn) {
     const data = CHARACTERS[unit.charId];
     const s = getScaledStats(unit);
@@ -1469,10 +1506,12 @@ function renderShop() {
 state.subscribe((event) => {
     if (event.type === 'gold' || event.type === 'levelup' || event.type === 'roundEnd') {
         refreshHud();
+        updateBuyXpButton();   // gold or level changed → next-level math shifts
     }
     if (event.type === 'board') {
         updateSynergyPanel();
         refreshSynergyBadges();
+        updateBuyXpButton();   // Researcher count may have changed → price shifts
     }
 });
 
@@ -1509,19 +1548,23 @@ document.addEventListener('DOMContentLoaded', () => {
         }
         updateRefreshButton();
 
-        // Inject a "Buy XP" button next to refresh
+        // Inject a "Buy XP" button next to refresh. Label updates reactively
+        // to show the current Researcher-discounted price AND the projected
+        // total gold to reach the next complete level from the current XP bar.
         const shopHeader = document.querySelector('.shop-header');
         if (shopHeader && !document.getElementById('buy-xp-btn')) {
             const xpBtn = document.createElement('button');
             xpBtn.id = 'buy-xp-btn';
             xpBtn.className = 'refresh-btn';
             xpBtn.style.marginLeft = '10px';
-            xpBtn.textContent = 'Buy XP (4g)';
             xpBtn.addEventListener('click', () => {
-                if (!state.buyXp()) flashMessage('Cannot buy XP');
+                const cost = computeXpCost();
+                if (!state.buyXp(cost)) flashMessage('Cannot buy XP');
+                updateBuyXpButton();
             });
             shopHeader.appendChild(xpBtn);
         }
+        updateBuyXpButton();
 
         // Fight button — net-aware. If a server room is matched, we hand our
         // board snapshot off and wait for the opponent's before starting
