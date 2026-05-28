@@ -26,22 +26,26 @@ const CHARACTERS = {
     RockStarDad: {
         id: "rockstardad", displayName: "RockStarDad",
         style: "Strategist", work: ["Trader"],
-        cost: 1, baseStats: { hp: 450, attack: 42, armor: 15, abilityPower: 55 }
+        cost: 1, baseStats: { hp: 450, attack: 42, armor: 15, abilityPower: 55 },
+        ability: { id: "single_strike", chargeMax: 5 }
     },
     Profu: {
         id: "profu", displayName: "Profu",
         style: "Disciplinarian", work: ["Trader"],
-        cost: 2, baseStats: { hp: 630, attack: 52, armor: 31, abilityPower: 70 }
+        cost: 2, baseStats: { hp: 630, attack: 52, armor: 31, abilityPower: 70 },
+        ability: { id: "shield_ally", chargeMax: 4 }
     },
     irina_88: {
         id: "irina_88", displayName: "irina_88",
         style: "Survivalist", work: ["Trader"],
-        cost: 3, baseStats: { hp: 900, attack: 63, armor: 37, abilityPower: 90 }
+        cost: 3, baseStats: { hp: 900, attack: 63, armor: 37, abilityPower: 90 },
+        ability: { id: "heal_aura", chargeMax: 4 }
     },
     MasterBart: {
         id: "masterbart", displayName: "MasterBart",
         style: "Solidarity", work: ["Trader"],
-        cost: 4, baseStats: { hp: 990, attack: 85, armor: 52, abilityPower: 115 }
+        cost: 4, baseStats: { hp: 990, attack: 85, armor: 52, abilityPower: 115 },
+        ability: { id: "team_buff", chargeMax: 3 }
     },
 
     // ==========================================
@@ -50,23 +54,26 @@ const CHARACTERS = {
     Berlin: {
         id: "berlin", displayName: "Berlin",
         style: "Friendly", work: ["Killer"],
-        cost: 1, baseStats: { hp: 450, attack: 36, armor: 15, abilityPower: 57 }
+        cost: 1, baseStats: { hp: 450, attack: 36, armor: 15, abilityPower: 57 },
+        ability: { id: "single_strike", chargeMax: 5 }
     },
     Lurio: {
         id: "lurio", displayName: "Lurio",
         style: "Solidarity", work: ["Killer"],
-        cost: 2, baseStats: { hp: 660, attack: 55, armor: 29, abilityPower: 70 }
+        cost: 2, baseStats: { hp: 660, attack: 55, armor: 29, abilityPower: 70 },
+        ability: { id: "cleave", chargeMax: 4 }
     },
     Craig_demon: {
         id: "craig_demon", displayName: "Craig_demon",
         style: "Hard Hitter", work: ["Killer"],
-        cost: 3, baseStats: { hp: 712, attack: 87, armor: 31, abilityPower: 85 }
+        cost: 3, baseStats: { hp: 712, attack: 87, armor: 31, abilityPower: 85 },
+        ability: { id: "chain_zap", chargeMax: 4 }
     },
     Binkly: {
         id: "binkly", displayName: "Binkly",
         style: "Disciplinarian", work: ["Killer"],
         cost: 4, baseStats: { hp: 945, attack: 81, armor: 56, abilityPower: 115 },
-        ability: { id: "aoe_blast", chargeMax: 4 }
+        ability: { id: "aoe_blast", chargeMax: 3 }
     },
 
     // ==========================================
@@ -75,12 +82,14 @@ const CHARACTERS = {
     Andrew: {
         id: "andrew", displayName: "Andrew",
         style: "Researcher", work: ["Mentor"],
-        cost: 1, baseStats: { hp: 428, attack: 38, armor: 14, abilityPower: 63 }
+        cost: 1, baseStats: { hp: 428, attack: 38, armor: 14, abilityPower: 63 },
+        ability: { id: "heal_aura", chargeMax: 5 }
     },
     Helen: {
         id: "helen", displayName: "Helen",
         style: "Friendly", work: ["Mentor"],
-        cost: 2, baseStats: { hp: 600, attack: 49, armor: 25, abilityPower: 80 }
+        cost: 2, baseStats: { hp: 600, attack: 49, armor: 25, abilityPower: 80 },
+        ability: { id: "heal_aura", chargeMax: 4 }
     },
     Drago: {
         id: "drago", displayName: "Drago",
@@ -92,7 +101,8 @@ const CHARACTERS = {
     CG: {
         id: "cg", displayName: "CG",
         style: "Strategist", work: ["Mentor", "Leader"],
-        cost: 4, baseStats: { hp: 900, attack: 89, armor: 45, abilityPower: 127 }
+        cost: 4, baseStats: { hp: 900, attack: 89, armor: 45, abilityPower: 127 },
+        ability: { id: "team_buff", chargeMax: 3 }
     },
 
     // ==========================================
@@ -103,13 +113,15 @@ const CHARACTERS = {
     Reh: {
         id: "reh", displayName: "Reh",
         style: "Hard Hitter", work: ["Leader"],
-        cost: 1, baseStats: { hp: 428, attack: 50, armor: 14, abilityPower: 47 }
+        cost: 1, baseStats: { hp: 428, attack: 50, armor: 14, abilityPower: 47 },
+        ability: { id: "single_strike", chargeMax: 5 }
     },
     // Xtatik: Leader + Avenger, 3g. Spans both faction rows.
     Xtatik: {
         id: "xtatik", displayName: "Xtatik",
         style: "Disciplinarian", work: ["Leader", "Avenger"],
-        cost: 3, baseStats: { hp: 788, attack: 66, armor: 44, abilityPower: 90 }
+        cost: 3, baseStats: { hp: 788, attack: 66, armor: 44, abilityPower: 90 },
+        ability: { id: "shield_ally", chargeMax: 4 }
     },
     // (CG is the 4g Leader champ; defined above under MENTOR row.)
 
@@ -119,18 +131,21 @@ const CHARACTERS = {
     KuroKrysel: {
         id: "kurokrysel", displayName: "KuroKrysel",
         style: "Researcher", work: ["Avenger"],
-        cost: 1, baseStats: { hp: 428, attack: 38, armor: 14, abilityPower: 63 }
+        cost: 1, baseStats: { hp: 428, attack: 38, armor: 14, abilityPower: 63 },
+        ability: { id: "single_strike", chargeMax: 5 }
     },
     Epic: {
         id: "epic", displayName: "Epic",
         style: "Survivalist", work: ["Avenger"],
-        cost: 2, baseStats: { hp: 720, attack: 49, armor: 26, abilityPower: 70 }
+        cost: 2, baseStats: { hp: 720, attack: 49, armor: 26, abilityPower: 70 },
+        ability: { id: "cleave", chargeMax: 4 }
     },
     // (Xtatik is the 3g Avenger champ; defined above under LEADER row.)
     Young: {
         id: "young", displayName: "Young",
         style: "Solidarity", work: ["Avenger"],
-        cost: 4, baseStats: { hp: 990, attack: 85, armor: 52, abilityPower: 115 }
+        cost: 4, baseStats: { hp: 990, attack: 85, armor: 52, abilityPower: 115 },
+        ability: { id: "aoe_blast", chargeMax: 3 }
     },
 
     // ==========================================
@@ -139,18 +154,20 @@ const CHARACTERS = {
     Wkd_w0lf: {
         id: "wkd_w0lf", displayName: "Wkd-w0lf",
         style: "Hard Hitter", work: ["Coder"],
-        cost: 1, baseStats: { hp: 428, attack: 50, armor: 14, abilityPower: 47 }
+        cost: 1, baseStats: { hp: 428, attack: 50, armor: 14, abilityPower: 47 },
+        ability: { id: "chain_zap", chargeMax: 5 }
     },
     Bob: {
         id: "bob", displayName: "Bob",
         style: "Solidarity", work: ["Coder"],
-        cost: 2, baseStats: { hp: 660, attack: 55, armor: 29, abilityPower: 70 }
+        cost: 2, baseStats: { hp: 660, attack: 55, armor: 29, abilityPower: 70 },
+        ability: { id: "chain_zap", chargeMax: 4 }
     },
     Star_Vader: {
         id: "star_vader", displayName: "Star_Vader",
         style: "Strategist", work: ["Coder"],
         cost: 3, baseStats: { hp: 750, attack: 73, armor: 35, abilityPower: 99 },
-        ability: { id: "chain_zap", chargeMax: 3 }
+        ability: { id: "chain_zap", chargeMax: 4 }
     },
     Spidernnam: {
         id: "spidernnam", displayName: "Spidernnam",
@@ -165,22 +182,26 @@ const CHARACTERS = {
     LoloCoko: {
         id: "lolocoko", displayName: "LoloCoko",
         style: "Researcher", work: ["Recruiter"],
-        cost: 1, baseStats: { hp: 428, attack: 38, armor: 14, abilityPower: 63 }
+        cost: 1, baseStats: { hp: 428, attack: 38, armor: 14, abilityPower: 63 },
+        ability: { id: "heal_aura", chargeMax: 5 }
     },
     Rockless: {
         id: "rockless", displayName: "Rockless",
         style: "Disciplinarian", work: ["Recruiter"],
-        cost: 2, baseStats: { hp: 630, attack: 52, armor: 31, abilityPower: 70 }
+        cost: 2, baseStats: { hp: 630, attack: 52, armor: 31, abilityPower: 70 },
+        ability: { id: "shield_ally", chargeMax: 4 }
     },
     Ashe_me: {
         id: "ashe_me", displayName: "Ashe_me",
         style: "Friendly", work: ["Recruiter"],
-        cost: 3, baseStats: { hp: 750, attack: 63, armor: 35, abilityPower: 103 }
+        cost: 3, baseStats: { hp: 750, attack: 63, armor: 35, abilityPower: 103 },
+        ability: { id: "team_buff", chargeMax: 4 }
     },
     Kelly_maxine: {
         id: "kelly_maxine", displayName: "Kelly_maxine",
         style: "Survivalist", work: ["Recruiter"],
-        cost: 4, baseStats: { hp: 1080, attack: 76, armor: 47, abilityPower: 115 }
+        cost: 4, baseStats: { hp: 1080, attack: 76, armor: 47, abilityPower: 115 },
+        ability: { id: "team_buff", chargeMax: 3 }
     },
 
     // ==========================================
@@ -189,22 +210,26 @@ const CHARACTERS = {
     FlipJames: {
         id: "flipjames", displayName: "FlipJames",
         style: "Strategist", work: ["OutdoorPerson"],
-        cost: 1, baseStats: { hp: 450, attack: 42, armor: 15, abilityPower: 55 }
+        cost: 1, baseStats: { hp: 450, attack: 42, armor: 15, abilityPower: 55 },
+        ability: { id: "single_strike", chargeMax: 5 }
     },
     Ganji_Chudail: {
         id: "ganji_chudail", displayName: "Ganji_Chudail",
         style: "Friendly", work: ["OutdoorPerson"],
-        cost: 2, baseStats: { hp: 600, attack: 49, armor: 25, abilityPower: 80 }
+        cost: 2, baseStats: { hp: 600, attack: 49, armor: 25, abilityPower: 80 },
+        ability: { id: "slow_enemy", chargeMax: 4 }
     },
     MarmotMenace: {
         id: "marmotmenace", displayName: "MarmotMenace",
         style: "Survivalist", work: ["OutdoorPerson"],
-        cost: 3, baseStats: { hp: 900, attack: 63, armor: 37, abilityPower: 90 }
+        cost: 3, baseStats: { hp: 900, attack: 63, armor: 37, abilityPower: 90 },
+        ability: { id: "cleave", chargeMax: 4 }
     },
     Leandra: {
         id: "leandra", displayName: "Leandra",
         style: "Hard Hitter", work: ["OutdoorPerson"],
-        cost: 4, baseStats: { hp: 855, attack: 106, armor: 41, abilityPower: 109 }
+        cost: 4, baseStats: { hp: 855, attack: 106, armor: 41, abilityPower: 109 },
+        ability: { id: "aoe_blast", chargeMax: 3 }
     },
 
     // ==========================================
@@ -216,6 +241,19 @@ const CHARACTERS = {
         cost: 5, baseStats: { hp: 1100, attack: 110, armor: 55, abilityPower: 160 },
         ability: { id: "chain_zap", chargeMax: 2 }
     }
+};
+
+// Attack speed multiplier per style. Mana fills by attackSpeed each attack,
+// so faster styles see their abilities cast sooner. Combat tick interval is
+// constant (1 attack per tick); only the mana fill rate varies.
+const STYLE_ATTACK_SPEED = {
+    "Hard Hitter":    1.30,
+    "Strategist":     1.10,
+    "Researcher":     1.00,
+    "Friendly":       1.00,
+    "Disciplinarian": 0.95,
+    "Solidarity":     0.90,
+    "Survivalist":    0.85
 };
 
 const SYMBOLS = {
@@ -300,5 +338,5 @@ const SYNERGIES = {
 };
 
 if (typeof module !== 'undefined' && module.exports) {
-    module.exports = { CHARACTERS, SYMBOLS, SYNERGIES };
+    module.exports = { CHARACTERS, SYMBOLS, SYNERGIES, STYLE_ATTACK_SPEED };
 }
