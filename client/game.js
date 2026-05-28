@@ -317,6 +317,20 @@ function doMerge(triplet) {
 
     const stars = '★'.repeat(survivor.unit.stars);
     flashMessage(`${CHARACTERS[survivor.unit.charId].displayName} → ${stars}`);
+
+    // If we just hit 3★, evict any currently-displayed shop card of that
+    // charId so the player can't accidentally buy a now-useless duplicate.
+    // The next rollShop will also exclude them from the pool entirely.
+    if (survivor.unit.stars >= 3) {
+        let dirty = false;
+        state.shop.forEach((id, i) => {
+            if (id === survivor.unit.charId) { state.shop[i] = null; dirty = true; }
+        });
+        if (dirty) {
+            state._emit({ type: 'shop' });
+            renderShop();
+        }
+    }
 }
 
 // Where is this uid currently? Returns {kind:'bench', slot} or {kind:'board', col, row} or null.
@@ -516,17 +530,19 @@ function pointInSellZone(x, y) {
 //   Top edge y = -40, bottom edge y = +40.
 //
 //     +---------------+
-//     |  === HP ====  |   y = -32   HP bar (always visible)
-//     |   [portrait]  |   y =  -5   portrait
+//     |  === HP ====  |   y = -36   HP bar
+//     |  === MN ====  |   y = -30   mana bar (Phase 5)
+//     |   [portrait]  |   y =  -3   portrait
 //     |   ⭐ ⭐ ⭐    |   y = +20   stars
 //     |  🧠  💻    ●  |   y = +30   style | work | active-badge
 //     +---------------+
 const CARD = {
     W: 50,
     H: 80,
-    PORTRAIT_SIZE: 40,
-    PORTRAIT_Y: -5,
-    HP_Y: -32,
+    PORTRAIT_SIZE: 38,
+    PORTRAIT_Y: -3,
+    HP_Y:   -36,
+    MANA_Y: -30,
     STARS_Y: +20,
     WORK_Y: +30,
     STYLE_ICON_XY: { x: -16, y: +30 },    // bottom-left
@@ -638,6 +654,9 @@ function createUnitContainer(scene, unit) {
     const portrait = buildPortraitChild(scene, unit);
     const hpBg     = scene.add.rectangle(0, CARD.HP_Y, 40, 4, 0x440000);
     const hpFill   = scene.add.rectangle(0, CARD.HP_Y, 40, 4, 0x32cd32);
+    // Mana bar (Phase 5): left-anchored rect that grows with abilityCharge.
+    const manaBg   = scene.add.rectangle(0, CARD.MANA_Y, 40, 3, 0x14213a);
+    const manaFill = scene.add.rectangle(-20, CARD.MANA_Y, 0, 3, 0x4dabf7).setOrigin(0, 0.5);
     const starRow  = buildStarRow(scene, unit.stars || 1);
 
     // Bottom: work icons (1–2 emoji, small text).
@@ -658,7 +677,7 @@ function createUnitContainer(scene, unit) {
     const badge = buildSynergyBadge(scene);
 
     const container = scene.add.container(0, 0, [
-        frame, portrait, hpBg, hpFill, starRow, workText, styleIcon, badge
+        frame, portrait, hpBg, hpFill, manaBg, manaFill, starRow, workText, styleIcon, badge
     ]);
     container.setSize(CARD.W, CARD.H);
     container.setData('uid', unit.uid);
@@ -666,6 +685,7 @@ function createUnitContainer(scene, unit) {
     container.setData('portrait', portrait);
     container.setData('frame', frame);
     container.setData('hpFill', hpFill);
+    container.setData('manaFill', manaFill);
     container.setData('starRow', starRow);
     container.setData('badge', badge);
     // No setInteractive here — drag is handled by a scene-level pointer
@@ -712,6 +732,20 @@ function updateHpBar(container) {
     const hpFill = container.getData('hpFill');
     // HP bar is 40 wide at full HP; scale by current/max.
     if (hpFill) hpFill.width = 40 * pct;
+}
+
+// Mana bar reads unit.abilityCharge / ability.chargeMax. Bar is left-anchored
+// (origin 0, 0.5) so its width grows from the left edge.
+function updateManaBar(container) {
+    const fill = container.getData('manaFill');
+    if (!fill) return;
+    const unit = container.getData('unit');
+    if (!unit) return;
+    const def = CHARACTERS[unit.charId].ability;
+    if (!def) { fill.width = 0; return; }
+    const cur = unit.abilityCharge || 0;
+    const max = def.chargeMax || 1;
+    fill.width = 40 * Math.max(0, Math.min(1, cur / max));
 }
 
 function updateStarRow(container) {
@@ -1007,50 +1041,97 @@ function applyDamage(target, dmg) {
     }
 }
 
+// All ability damage/healing scales by the caster's scaled abilityPower.
+// AP grows with both cost tier (baseStats) and stars (× starMultiplier), so a
+// 4g 2★ unit naturally hits much harder than a 1g 1★ unit casting the same
+// ability id — no per-cost code paths needed.
+function casterAP(caster) {
+    return getScaledStats(caster.getData('unit')).abilityPower;
+}
+
 const ABILITIES = {
-    // Cyan lightning that bounces to up to 3 nearest enemies, dealing
-    // diminishing damage on each bounce.
+    // ----- BASIC (1g flavour) -----------------------------------------------
+    // Big single-target burst on a random live enemy.
+    single_strike: {
+        name: "Strike",
+        execute(scene, caster, allies, enemies) {
+            const live = enemies.filter(c => c.active && c.visible);
+            if (!live.length) return;
+            const target = live[Math.floor(Math.random() * live.length)];
+            const slash = scene.add.graphics();
+            slash.lineStyle(5, 0xfff066, 1);
+            slash.beginPath();
+            slash.moveTo(caster.x, caster.y);
+            slash.lineTo(target.x, target.y);
+            slash.strokePath();
+            scene.tweens.add({ targets: slash, alpha: 0, duration: 350,
+                onComplete: () => slash.destroy() });
+            applyDamage(target, Math.floor(casterAP(caster) * 1.4));
+        }
+    },
+    // Hit the 2 nearest enemies with a sweep.
+    cleave: {
+        name: "Cleave",
+        execute(scene, caster, allies, enemies) {
+            const live = enemies.filter(c => c.active && c.visible);
+            if (!live.length) return;
+            const targets = live
+                .map(t => ({ t, d: Phaser.Math.Distance.Between(caster.x, caster.y, t.x, t.y) }))
+                .sort((a, b) => a.d - b.d)
+                .slice(0, 2)
+                .map(x => x.t);
+            const dmg = Math.floor(casterAP(caster) * 0.95);
+            targets.forEach(t => {
+                const sweep = scene.add.graphics();
+                sweep.lineStyle(4, 0xff922b, 0.95);
+                sweep.beginPath();
+                sweep.moveTo(caster.x, caster.y);
+                sweep.lineTo(t.x, t.y);
+                sweep.strokePath();
+                scene.tweens.add({ targets: sweep, alpha: 0, duration: 320,
+                    onComplete: () => sweep.destroy() });
+                applyDamage(t, dmg);
+            });
+        }
+    },
+
+    // ----- CHAIN / AOE ------------------------------------------------------
+    // Cyan lightning that bounces to up to 3 nearest enemies, diminishing.
     chain_zap: {
         name: "Chain Zap",
         execute(scene, caster, allies, enemies) {
             const live = enemies.filter(c => c.active && c.visible);
-            if (live.length === 0) return;
+            if (!live.length) return;
             const sorted = live
                 .map(t => ({ t, d: Phaser.Math.Distance.Between(caster.x, caster.y, t.x, t.y) }))
                 .sort((a, b) => a.d - b.d)
                 .slice(0, 3)
                 .map(x => x.t);
-            const cu = caster.getData('unit');
-            const baseDmg = Math.floor(90 * starMultiplier(cu.stars));
+            const baseDmg = Math.floor(casterAP(caster) * 1.0);
             let prev = caster;
             sorted.forEach((t, i) => {
                 const zap = scene.add.graphics();
                 zap.lineStyle(3, 0x00ffff, 1);
                 zap.beginPath();
                 zap.moveTo(prev.x, prev.y);
-                // Mid-jag for a "lightning" feel.
                 const mx = (prev.x + t.x) / 2 + (Math.random() - 0.5) * 24;
                 const my = (prev.y + t.y) / 2 + (Math.random() - 0.5) * 24;
                 zap.lineTo(mx, my);
                 zap.lineTo(t.x, t.y);
                 zap.strokePath();
-                scene.tweens.add({
-                    targets: zap, alpha: 0, duration: 420,
-                    onComplete: () => zap.destroy()
-                });
+                scene.tweens.add({ targets: zap, alpha: 0, duration: 420,
+                    onComplete: () => zap.destroy() });
                 applyDamage(t, Math.floor(baseDmg * Math.pow(0.7, i)));
                 prev = t;
             });
         }
     },
-    // Expanding ring centered on caster; everything caught in the final
-    // radius takes flat damage.
+    // Expanding ring centered on caster; everything in the final radius takes damage.
     aoe_blast: {
         name: "Blast",
         execute(scene, caster, allies, enemies) {
             const radius = 110;
             const ring = scene.add.graphics();
-            ring.lineStyle(3, 0xff922b, 1);
             const obj = { r: 8 };
             scene.tweens.add({
                 targets: obj, r: radius, duration: 480, ease: 'Cubic.easeOut',
@@ -1061,8 +1142,7 @@ const ABILITIES = {
                 },
                 onComplete: () => ring.destroy()
             });
-            const cu = caster.getData('unit');
-            const dmg = Math.floor(70 * starMultiplier(cu.stars));
+            const dmg = Math.floor(casterAP(caster) * 0.85);
             enemies.forEach(t => {
                 if (!t.active || !t.visible) return;
                 const d = Phaser.Math.Distance.Between(caster.x, caster.y, t.x, t.y);
@@ -1070,19 +1150,18 @@ const ABILITIES = {
             });
         }
     },
-    // Green pulse on caster; restores HP to every living ally.
+
+    // ----- SUPPORT ----------------------------------------------------------
+    // Green pulse — restores HP to every living ally.
     heal_aura: {
         name: "Aura",
         execute(scene, caster, allies, enemies) {
-            const cu = caster.getData('unit');
-            const heal = Math.floor(120 * starMultiplier(cu.stars));
+            const heal = Math.floor(casterAP(caster) * 1.0);
             const ring = scene.add.graphics();
             ring.fillStyle(0x32cd32, 0.28);
             ring.fillCircle(caster.x, caster.y, 70);
-            scene.tweens.add({
-                targets: ring, alpha: 0, duration: 600,
-                onComplete: () => ring.destroy()
-            });
+            scene.tweens.add({ targets: ring, alpha: 0, duration: 600,
+                onComplete: () => ring.destroy() });
             allies.forEach(c => {
                 if (!c.active || !c.visible) return;
                 const u = c.getData('unit');
@@ -1090,18 +1169,93 @@ const ABILITIES = {
                 updateHpBar(c);
             });
         }
+    },
+    // Yellow rally — heal whole team a bit (placeholder for a real attack buff).
+    team_buff: {
+        name: "Rally",
+        execute(scene, caster, allies, enemies) {
+            const heal = Math.floor(casterAP(caster) * 0.7);
+            const ring = scene.add.graphics();
+            ring.fillStyle(0xffd43b, 0.22);
+            ring.fillCircle(caster.x, caster.y, 90);
+            scene.tweens.add({ targets: ring, alpha: 0, duration: 700,
+                onComplete: () => ring.destroy() });
+            allies.forEach(c => {
+                if (!c.active || !c.visible) return;
+                const u = c.getData('unit');
+                u.currentHp = Math.min(u.maxHp, u.currentHp + heal);
+                updateHpBar(c);
+            });
+        }
+    },
+    // Blue ring on the lowest-HP ally (or self), restoring a chunk of HP.
+    shield_ally: {
+        name: "Shield",
+        execute(scene, caster, allies, enemies) {
+            const cu = caster.getData('unit');
+            const shield = Math.floor(casterAP(caster) * 0.85);
+            const live = allies.filter(c => c.active && c.visible);
+            // Lowest HP-ratio ally; defaults to self if no allies tracked.
+            let target = caster;
+            if (live.length) {
+                target = live.reduce((lo, c) => {
+                    const lu = lo.getData('unit'), uu = c.getData('unit');
+                    return (uu.currentHp / uu.maxHp) < (lu.currentHp / lu.maxHp) ? c : lo;
+                });
+            }
+            const tu = target.getData('unit');
+            tu.currentHp = Math.min(tu.maxHp, tu.currentHp + shield);
+            updateHpBar(target);
+            const ring = scene.add.graphics();
+            ring.lineStyle(3, 0x4dabf7, 0.95);
+            ring.strokeCircle(target.x, target.y, 35);
+            scene.tweens.add({ targets: ring, alpha: 0, duration: 520,
+                onComplete: () => ring.destroy() });
+        }
+    },
+    // Slow: deal damage and bleed mana off the target so their next cast is delayed.
+    slow_enemy: {
+        name: "Slow",
+        execute(scene, caster, allies, enemies) {
+            const live = enemies.filter(c => c.active && c.visible);
+            if (!live.length) return;
+            const target = live
+                .map(t => ({ t, d: Phaser.Math.Distance.Between(caster.x, caster.y, t.x, t.y) }))
+                .sort((a, b) => a.d - b.d)[0].t;
+            applyDamage(target, Math.floor(casterAP(caster) * 0.6));
+            const tu = target.getData('unit');
+            tu.abilityCharge = Math.max(0, (tu.abilityCharge || 0) - 2);
+            updateManaBar(target);
+            const spiral = scene.add.graphics();
+            spiral.lineStyle(2, 0x4dabf7, 0.85);
+            spiral.strokeCircle(target.x, target.y, 30);
+            scene.tweens.add({ targets: spiral, alpha: 0, duration: 600,
+                onComplete: () => spiral.destroy() });
+        }
     }
 };
 
-// Tick a caster's charge after their normal attack. Fires the handler at
-// chargeMax and resets. Silently no-ops for characters without `ability`.
+// Attack speed (style-based) determines mana fill rate. Default 1.0 if the
+// style isn't in the table.
+function unitAttackSpeed(unit) {
+    const data = CHARACTERS[unit.charId];
+    if (!data) return 1.0;
+    return (typeof STYLE_ATTACK_SPEED !== 'undefined' && STYLE_ATTACK_SPEED[data.style]) || 1.0;
+}
+
+// Tick a caster's charge after their normal attack. Mana fills by the unit's
+// attackSpeed (Hard Hitters fill quickest, Survivalists slowest). When the
+// bar tops out, fire the handler and reset. Silently no-ops for characters
+// without `ability`.
 function tryCastAbility(scene, attacker, allies, enemies) {
     const u   = attacker.getData('unit');
     const def = CHARACTERS[u.charId].ability;
     if (!def) return;
-    u.abilityCharge = (u.abilityCharge || 0) + 1;
+    u.abilityCharge = (u.abilityCharge || 0) + unitAttackSpeed(u);
+    updateManaBar(attacker);
     if (u.abilityCharge < (def.chargeMax || 3)) return;
     u.abilityCharge = 0;
+    updateManaBar(attacker);
     const handler = ABILITIES[def.id];
     if (!handler) return;
     handler.execute(scene, attacker, allies, enemies);
@@ -1278,6 +1432,7 @@ function endCombat(won) {
         u.currentHp = u.maxHp;
         u.abilityCharge = 0;       // reset cast meter between rounds
         updateHpBar(c);
+        updateManaBar(c);
         c.setVisible(true);
         c.setActive(true);
         const loc = findUnitLocation(u.uid);

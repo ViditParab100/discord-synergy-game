@@ -11,7 +11,7 @@ A custom, web-based auto-battler designed to live inside Discord via the Embedde
 * **Live synergy tracking.** Every style and work tag has activation thresholds, per-tier buff multipliers, and human-readable ability descriptions. The side panel shows tier (★ / ★★ / ★★★), current count, and what the next threshold unlocks.
 * **3-star merge.** Owning 3 of the same character at the same star tier auto-merges into one unit a star higher. Cascades — 9× 1★ → 1× 3★ from a single buy. Stats scale 1.8× per star.
 * **Sell zone.** Drag any unit onto the red SELL panel for a 1×/3×/9× cost refund by star tier.
-* **Per-unit abilities.** Characters can declare `ability: { id, chargeMax }` in `dictionary.js`. After every basic attack the cast meter ticks; at chargeMax the matching handler fires (chain lightning, AOE blast, heal aura supplied as placeholder visuals — replace with custom art later).
+* **Per-unit mana + abilities.** Every character has an ability. A cyan mana bar between the HP track and the portrait fills with each basic attack; the fill rate scales with the unit's style (Hard Hitters fastest, Survivalists slowest). At full mana the matching handler fires (chain lightning, cleave, AOE blast, heal aura, team rally, shield, slow). All damage/healing scales by the caster's scaled `abilityPower`, so 1g abilities chip while 5g abilities swing rounds.
 * **Gold economy.** Round income + interest + win/loss streak bonuses + paid rerolls + XP purchasing + Trader synergy bonus + Recruiter free rerolls.
 * **Resurrection.** Dead player units come back to full HP at round end. Round loss damage scales with surviving enemies' stars, cost, and HP percentage.
 * **Hover info zone.** Hover any of your cards (board or bench) and the footer info zone shows name, cost, star tier, full scaled stats, and ability cadence.
@@ -188,11 +188,15 @@ net.js / server/
    Net events: joined → matched → submit_snapshot ↔ opponent_snapshot ↔ combat_result
 ```
 
-### Per-unit ability hook
+### Per-unit ability hook (mana system)
 
-Characters declare `ability: { id, chargeMax }`. The `ABILITIES` registry in `game.js` maps id → `{ name, execute(scene, caster, allies, enemies) }`. Combat ticks the caster's `abilityCharge` after each basic attack; at `chargeMax` the matching handler fires (then resets). All ability damage routes through `applyDamage()` so player deaths hide-and-resurrect and enemy deaths destroy. To swap art for an ability, rewrite its `execute()` body — the trigger pipeline doesn't change.
+Every character declares `ability: { id, chargeMax }` in `dictionary.js`. The `ABILITIES` registry in `game.js` maps id → `{ name, execute(scene, caster, allies, enemies) }`. After each basic attack the caster's `abilityCharge` grows by `STYLE_ATTACK_SPEED[style]`; at `chargeMax` the matching handler fires (then resets). Every ability uses `casterAP(caster)` to scale its damage/heal by the unit's scaled `abilityPower`, so power tracks both cost tier and star tier without per-character math.
 
-Currently tagged: Star_Vader, Spidernnam, JNRanger → `chain_zap`; Binkly → `aoe_blast`; Drago → `heal_aura`.
+The mana bar on each card is `abilityCharge / chargeMax` — cyan rectangle between the HP bar and the portrait. Resets to 0 at round end.
+
+All ability damage routes through `applyDamage()` so player deaths hide-and-resurrect and enemy deaths destroy. To swap art for an ability, rewrite its `execute()` body — the trigger pipeline doesn't change. To rebalance pacing, tune `chargeMax` (in `dictionary.js`) and/or `STYLE_ATTACK_SPEED`.
+
+Ability registry: `single_strike` (1g burst) · `cleave` (2-target sweep) · `chain_zap` (3-target lightning) · `aoe_blast` (radial damage) · `heal_aura` (full-team heal) · `team_buff` (yellow rally heal) · `shield_ally` (lowest-HP ally heal) · `slow_enemy` (damage + drain target mana).
 
 ## 🗺️ Roadmap
 
@@ -244,10 +248,24 @@ Currently tagged: Star_Vader, Spidernnam, JNRanger → `chain_zap`; Binkly → `
 - [x] **Opponent panel mirror** on right side — HP bar, synergy tiers, deployed roster, slot label. Refreshes on every `opponent_snapshot` and `opponent_combat_result`; resets on `opponent_left`.
 - [x] `computeBoardSynergies(board)` extracted so both sides reuse the same aggregation logic.
 
-### 💬 Phase 5 — Discord Integration
+### ✅ Phase 5 — Mana Update (DONE)
+- [x] **Every character has an ability** (1g → weak, 4g → strong, 5g → strongest). 8 ability ids cover the roster: `single_strike`, `cleave`, `chain_zap`, `aoe_blast`, `heal_aura`, `team_buff`, `shield_ally`, `slow_enemy`. All damage/healing scales by the caster's scaled `abilityPower`, so power tracks cost AND star tier automatically.
+- [x] **Mana bar** on every card — cyan rectangle between the HP bar (top) and the portrait (middle). Width = `abilityCharge / ability.chargeMax`. Resets to 0 at round end.
+- [x] **Attack speed** (style-derived) controls fill rate. After each basic attack the unit's `abilityCharge` increases by `STYLE_ATTACK_SPEED[style]`. Hard Hitters fill fastest (1.30), Survivalists slowest (0.85). Same combat tick interval — only the per-attack mana gain varies.
+- [x] **`chargeMax` by cost tier:** 1g = 5, 2g = 4, 3g = 4, 4g = 3, 5g = 2. Combined with style attack speed this gives a wide spread of cast cadences.
+
+| Cost | Example | Ability | chargeMax | Attacks-to-cast (Hard Hitter / Survivalist) |
+|---|---|---|---:|---:|
+| 1g | RockStarDad | single_strike | 5 | 4 / 6 |
+| 2g | Lurio | cleave | 4 | 4 / 5 |
+| 3g | Star_Vader | chain_zap | 4 | 4 / 5 |
+| 4g | Spidernnam | chain_zap | 3 | 3 / 4 |
+| 5g | JNRanger | chain_zap | 2 | 2 / 3 |
+
+### 💬 Phase 6 — Discord Integration
 - [ ] Wrap the final web app in the Discord Embedded App SDK for native channel play
 
-### ✨ Phase 6 — Stretch
+### ✨ Phase 7 — Stretch
 - [ ] True isometric rendering in Phaser (diamond tiles, z-sorting) if the CSS perspective ever feels limiting
 - [ ] Items / equipment system
 - [ ] Carousel rounds (shared loot phase)

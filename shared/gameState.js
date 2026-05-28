@@ -106,15 +106,29 @@
       return { base: ECONOMY.ROUND_INCOME, interest, streak: streakBonus, total };
     }
 
+    // Any charId the player already owns at 3★ (board OR bench). Maxed units
+    // are removed from the shop pool — there's nothing more to do with another
+    // copy, so the slot would be wasted.
+    getMaxedCharIds() {
+      const maxed = new Set();
+      this.bench.forEach(u => { if (u && (u.stars || 1) >= 3) maxed.add(u.charId); });
+      this.board.forEach(row => row.forEach(u => {
+        if (u && (u.stars || 1) >= 3) maxed.add(u.charId);
+      }));
+      return maxed;
+    }
+
     // ------------- shop -------------
     rollShop(characters, { paid = false } = {}) {
       if (paid && !this.spendGold(ECONOMY.REROLL_COST, 'reroll')) return false;
 
       const rates = DROP_RATES[Math.min(this.level, 10)] || DROP_RATES[10];
+      const maxed = this.getMaxedCharIds();
 
-      // Bucket character ids by cost once per roll.
+      // Bucket character ids by cost once per roll, skipping any 3★'d champ.
       const byCost = [[], [], [], [], []]; // index 0 = 1g
       for (const id in characters) {
+        if (maxed.has(id)) continue;
         const cost = characters[id].cost;
         if (cost >= 1 && cost <= 5) byCost[cost - 1].push(id);
       }
