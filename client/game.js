@@ -751,6 +751,54 @@ function findPlayerCardAt(x, y) {
     return found;
 }
 
+// Push character details into the footer info zone. Called on pointermove
+// hover (idle, not dragging). Pass null to clear back to the prompt.
+let _lastInfoUid = null;
+function updateInfoZone(unit) {
+    const body = document.getElementById('info-zone-body');
+    if (!body) return;
+    if (!unit) {
+        if (_lastInfoUid !== null) {
+            body.innerHTML = '<p style="color:#666; font-size:0.85em;">Hover a card to see details.</p>';
+            _lastInfoUid = null;
+        }
+        return;
+    }
+    if (unit.uid === _lastInfoUid) return; // no change
+    _lastInfoUid = unit.uid;
+
+    const data  = CHARACTERS[unit.charId];
+    const sIcon = SYMBOLS.styles[data.style] || '';
+    const wTags = data.work.map(w => `${SYMBOLS.work[w] || ''} ${w}`).join(' · ');
+    const stars = '★'.repeat(unit.stars || 1);
+    const stats = getScaledStats(unit);
+    const cost  = data.cost;
+    const tier  = COST_CSS[cost] || '#9aa0a6';
+
+    let abilityHtml = '';
+    if (data.ability) {
+        const handler = ABILITIES[data.ability.id];
+        const aName = (handler && handler.name) || data.ability.id;
+        abilityHtml = `<div class="info-ability">
+          <strong>${aName}</strong>
+          <span style="color:#aaa">— charges every ${data.ability.chargeMax} attacks</span>
+        </div>`;
+    }
+
+    body.innerHTML = `
+      <div class="info-name" style="border-left: 3px solid ${tier}; padding-left: 6px;">
+        ${data.displayName} <span style="color:${tier}; font-size:0.8em;">${cost}g</span>
+        <span style="color:#ffd43b; font-size:0.9em;"> ${stars}</span>
+      </div>
+      <div class="info-tags">${sIcon} ${data.style} &nbsp; ${wTags}</div>
+      <div class="info-stats">
+        HP ${unit.currentHp}/${unit.maxHp} &nbsp; ATK ${stats.attack}<br>
+        ARM ${stats.armor} &nbsp; AP ${stats.abilityPower}
+      </div>
+      ${abilityHtml}
+    `;
+}
+
 function installDragPipeline(scene) {
     scene.input.on('pointerdown', (pointer) => {
         if (dragState) return;
@@ -769,9 +817,14 @@ function installDragPipeline(scene) {
     });
 
     scene.input.on('pointermove', (pointer) => {
-        if (!dragState) return;
-        dragState.container.x = pointer.x;
-        dragState.container.y = pointer.y;
+        if (dragState) {
+            dragState.container.x = pointer.x;
+            dragState.container.y = pointer.y;
+            return;
+        }
+        // Idle hover → show info for whichever card is under the cursor.
+        const c = findPlayerCardAt(pointer.x, pointer.y);
+        updateInfoZone(c ? c.getData('unit') : null);
     });
 
     scene.input.on('pointerup', (pointer) => {
@@ -1027,8 +1080,18 @@ function startActionPhase() {
     });
 }
 
+// Most recent opponent snapshot from the net layer. When set, spawnEnemyTeam
+// mirrors it onto P2 instead of generating random enemies.
+let pendingOpponentSnapshot = null;
+
 function spawnEnemyTeam() {
     enemies = [];
+    if (pendingOpponentSnapshot && pendingOpponentSnapshot.board) {
+        spawnEnemyTeamFromSnapshot(pendingOpponentSnapshot);
+        pendingOpponentSnapshot = null;
+        return;
+    }
+    // Single-player fallback: random opponents scaled to your deployed count.
     const allIds = Object.keys(CHARACTERS);
     const enemyCount = Math.max(1, Math.min(state.boardCount() + 1, BOARD.COLS * BOARD.ROWS));
     for (let i = 0; i < enemyCount; i++) {
@@ -1039,6 +1102,27 @@ function spawnEnemyTeam() {
         const c = createUnitContainer(phaserScene, unit);
         placeUnitContainer(c, { kind: 'board', col, row, side: 'p2' });
         enemies.push(c);
+    }
+}
+
+// Build enemy team from the opponent's GameState.snapshot(): board[row][col]
+// entries carry charId + stars, which is everything we need to rebuild
+// equivalent unit objects on our P2 grid.
+function spawnEnemyTeamFromSnapshot(snap) {
+    for (let r = 0; r < BOARD.ROWS; r++) {
+        for (let c = 0; c < BOARD.COLS; c++) {
+            const oppUnit = snap.board[r] && snap.board[r][c];
+            if (!oppUnit || !CHARACTERS[oppUnit.charId]) continue;
+            const unit = makeUnit(oppUnit.charId, true);
+            unit.stars = oppUnit.stars || 1;
+            // Resync hp to the unit's scaled max so star tier is honoured.
+            const scaled = getScaledStats(unit);
+            unit.maxHp = scaled.hp;
+            unit.currentHp = scaled.hp;
+            const container = createUnitContainer(phaserScene, unit);
+            placeUnitContainer(container, { kind: 'board', col: c, row: r, side: 'p2' });
+            enemies.push(container);
+        }
     }
 }
 
@@ -1165,6 +1249,11 @@ function endCombat(won) {
 
     state.recordCombatResult(won, lossDamage);
 
+    // Let the opponent know how we did (their UI can mirror our HP track).
+    if (window.Net && Net.connected && Net.matched) {
+        Net.send('combat_result', { won, lossDamage, playerHp: state.playerHp });
+    }
+
     if (state.phase === 'gameover') {
         flashMessage('Game over — you ran out of HP!');
         return;
@@ -1209,8 +1298,14 @@ function updateSynergyPanel() {
         const globalTag = def.global && info.tier >= 0
             ? ` <span style="color:#ff922b;font-weight:bold">COMMAND</span>`
             : '';
-        return `<div style="color:${color}">
-          ${icon} ${name} ${stars} <strong>${info.count}</strong>${nextStr}${globalTag}
+        // Show the ability description for the unlocked tier (or the very next
+        // tier's preview when this synergy is still dim).
+        const descTier = info.tier >= 0 ? info.tier : 0;
+        const desc = (def.tierDesc && def.tierDesc[descTier]) || '';
+        const descColor = info.tier >= 0 ? '#9ae6b4' : '#5a5a66';
+        return `<div style="color:${color}; margin-bottom:4px">
+          <div>${icon} ${name} ${stars} <strong>${info.count}</strong>${nextStr}${globalTag}</div>
+          <div style="font-size:0.75em; color:${descColor}; padding-left:14px">${desc}</div>
         </div>`;
     }
 
@@ -1428,17 +1523,55 @@ document.addEventListener('DOMContentLoaded', () => {
             shopHeader.appendChild(xpBtn);
         }
 
-        // Fight button
+        // Fight button — net-aware. If a server room is matched, we hand our
+        // board snapshot off and wait for the opponent's before starting
+        // combat. Otherwise we fall back to single-player random enemies.
         const fightBtn = document.getElementById('start-fight-btn');
+        let awaitingOpponent = false;
         if (fightBtn) {
             fightBtn.addEventListener('click', () => {
                 if (state.boardCount() === 0) {
                     flashMessage('Deploy at least one unit before fighting!');
                     return;
                 }
+                if (window.Net && Net.connected && Net.matched) {
+                    if (awaitingOpponent) return;
+                    awaitingOpponent = true;
+                    fightBtn.textContent = '⏳ Waiting…';
+                    fightBtn.disabled = true;
+                    Net.send('submit_snapshot', state.snapshot());
+                    flashMessage('Waiting for opponent…');
+                    return;
+                }
                 fightBtn.style.display = 'none';
                 startActionPhase();
             });
+        }
+
+        // Connect to the server. If unreachable we stay single-player.
+        if (window.Net && typeof Net.init === 'function') {
+            Net.init();
+            Net.on('opponent_snapshot', ({ snapshot }) => {
+                pendingOpponentSnapshot = snapshot;
+                if (awaitingOpponent && fightBtn) {
+                    awaitingOpponent = false;
+                    fightBtn.style.display = 'none';
+                    fightBtn.disabled = false;
+                    fightBtn.textContent = '⚔️ FIGHT!';
+                    startActionPhase();
+                }
+            });
+            Net.on('opponent_left', () => {
+                flashMessage('Opponent disconnected — back to single-player.');
+                pendingOpponentSnapshot = null;
+                if (awaitingOpponent && fightBtn) {
+                    awaitingOpponent = false;
+                    fightBtn.disabled = false;
+                    fightBtn.textContent = '⚔️ FIGHT!';
+                }
+            });
+            Net.on('matched', () => flashMessage('Matched! Plan your board.'));
+            Net.on('joined', ({ slot }) => flashMessage(`Joined as ${slot}. Waiting for opponent…`));
         }
     }, 120);
 });
