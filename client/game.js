@@ -579,44 +579,46 @@ function pointInSellZone(x, y) {
 //   Local-space y axis points DOWN. Origin is the card center.
 //   Top edge y = -40, bottom edge y = +40.
 //
-//     +---------------+
-//     |  === HP ====  |   y = -36   HP bar
-//     |  === MN ====  |   y = -30   mana bar (Phase 5)
-//     |   [portrait]  |   y =  -3   portrait
+//   The portrait now FILLS the whole card (50×80) and overlays/HUD elements
+//   sit on top of it. Source art is 500×800 PNG (5:8 aspect, 10× the in-game
+//   size) so it stays crisp at any browser zoom level.
+//
+//     +---------------+   <- card border (drawn on top)
+//     |  === HP ====  |   y = -36   HP bar over portrait
+//     |  === MN ====  |   y = -30   mana bar
+//     |   [portrait]  |             portrait fills entire 50×80 underneath
 //     |   ⭐ ⭐ ⭐    |   y = +20   stars
 //     |  🧠  💻    ●  |   y = +30   style | work | active-badge
 //     +---------------+
 const CARD = {
     W: 50,
     H: 80,
-    PORTRAIT_SIZE: 38,
-    PORTRAIT_Y: -3,
-    HP_Y:   -36,
-    MANA_Y: -30,
+    HP_Y:   -52,   // floats ABOVE the card top (-40) so the portrait face is unobstructed
+    MANA_Y: -46,
     STARS_Y: +20,
     WORK_Y: +30,
-    STYLE_ICON_XY: { x: -16, y: +30 },    // bottom-left
-    BADGE_XY:      { x: +18, y: +30 }     // bottom-right (active synergy)
+    STYLE_ICON_XY: { x: -16, y: +30 },    // bottom-left, on portrait
+    BADGE_XY:      { x: +18, y: +30 }     // bottom-right, on portrait (active synergy)
 };
 
 function buildPortraitChild(scene, unit) {
-    // Returns the visual that represents the character. Uses the loaded
-    // portrait texture when present, else a colored rectangle so the game
-    // remains fully playable before art is delivered.
+    // Fills the whole card. Uses the loaded portrait texture if present, else
+    // a style-colored rectangle + short name so the game remains fully playable
+    // before art is delivered.
     const charData = CHARACTERS[unit.charId];
     const texKey = 'portrait_' + unit.charId;
     if (scene.textures.exists(texKey)) {
-        const img = scene.add.image(0, CARD.PORTRAIT_Y, texKey);
-        img.setDisplaySize(CARD.PORTRAIT_SIZE, CARD.PORTRAIT_SIZE);
+        const img = scene.add.image(0, 0, texKey);
+        img.setDisplaySize(CARD.W, CARD.H);
         if (unit.isEnemy) img.setTint(0xff8888);
         return img;
     }
-    // Fallback: filled rect + short name. The styled portrait will replace
-    // this once PNGs land in client/assets/portraits/.
+    // Fallback covers the whole card too. Slightly inset so the border isn't
+    // overlapped at the corners.
     const fill = unit.isEnemy ? 0x882222 : (STYLE_COLORS[charData.style] || 0x4dabf7);
-    const rect = scene.add.rectangle(0, CARD.PORTRAIT_Y, CARD.PORTRAIT_SIZE, CARD.PORTRAIT_SIZE, fill);
-    const shortName = charData.displayName.substring(0, 4).toUpperCase();
-    const text = scene.add.text(0, CARD.PORTRAIT_Y, shortName, {
+    const rect = scene.add.rectangle(0, 0, CARD.W - 2, CARD.H - 2, fill);
+    const shortName = charData.displayName.substring(0, 6).toUpperCase();
+    const text = scene.add.text(0, 0, shortName, {
         fontSize: '10px', fontFamily: 'Arial', color: '#000000',
         fontStyle: 'bold', align: 'center'
     }).setOrigin(0.5);
@@ -625,17 +627,23 @@ function buildPortraitChild(scene, unit) {
     return group;
 }
 
-function buildCardFrame(scene, cost, isEnemy) {
-    // Vertical card frame: dark fill + neon cost-tier border + outer halo.
+// Background: outer neon halo + dark inner fill. Drawn BEHIND the portrait so
+// the dark fill peeks through any transparent edges of the source PNG.
+function buildCardBg(scene, cost, isEnemy) {
     const color = isEnemy ? 0x991e1e : (COST_COLORS[cost] || 0x666666);
     const g = scene.add.graphics();
-    // Outer halo
     g.lineStyle(4, color, 0.22);
     g.strokeRoundedRect(-CARD.W/2 - 1, -CARD.H/2 - 1, CARD.W + 2, CARD.H + 2, 6);
-    // Dark fill
     g.fillStyle(0x0e0e16, 0.92);
     g.fillRoundedRect(-CARD.W/2, -CARD.H/2, CARD.W, CARD.H, 5);
-    // Sharp border
+    return g;
+}
+
+// Sharp cost-tier border. Drawn on top of everything else so the portrait
+// can't cover it at the rounded corners.
+function buildCardBorder(scene, cost, isEnemy) {
+    const color = isEnemy ? 0x991e1e : (COST_COLORS[cost] || 0x666666);
+    const g = scene.add.graphics();
     g.lineStyle(1.5, color, 1);
     g.strokeRoundedRect(-CARD.W/2, -CARD.H/2, CARD.W, CARD.H, 5);
     return g;
@@ -697,10 +705,11 @@ function paintSynergyBadge(g, color) {
 
 function createUnitContainer(scene, unit) {
     // Vertical card 50×80. Stacking order (back to front):
-    //   frame → portrait → HP bar → stars → work-icon row → style icon → badge
+    //   bg (halo + dark fill) → portrait (fills card) → HP/mana bars
+    //   → stars → work icons → style icon → synergy badge → border (on top)
     const charData = CHARACTERS[unit.charId];
 
-    const frame    = buildCardFrame(scene, charData.cost, unit.isEnemy);
+    const bg       = buildCardBg(scene, charData.cost, unit.isEnemy);
     const portrait = buildPortraitChild(scene, unit);
     const hpBg     = scene.add.rectangle(0, CARD.HP_Y, 40, 4, 0x440000);
     const hpFill   = scene.add.rectangle(0, CARD.HP_Y, 40, 4, 0x32cd32);
@@ -726,14 +735,19 @@ function createUnitContainer(scene, unit) {
     // Top-left corner: synergy ACTIVE indicator (lit by refreshSynergyBadges)
     const badge = buildSynergyBadge(scene);
 
+    // Drawn last so the border can't be obscured by the portrait's edges.
+    const border = buildCardBorder(scene, charData.cost, unit.isEnemy);
+
     const container = scene.add.container(0, 0, [
-        frame, portrait, hpBg, hpFill, manaBg, manaFill, starRow, workText, styleIcon, badge
+        bg, portrait, hpBg, hpFill, manaBg, manaFill,
+        starRow, workText, styleIcon, badge, border
     ]);
     container.setSize(CARD.W, CARD.H);
     container.setData('uid', unit.uid);
     container.setData('unit', unit);
     container.setData('portrait', portrait);
-    container.setData('frame', frame);
+    container.setData('bg', bg);
+    container.setData('border', border);
     container.setData('hpFill', hpFill);
     container.setData('manaFill', manaFill);
     container.setData('starRow', starRow);
