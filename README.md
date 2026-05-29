@@ -7,15 +7,16 @@ A custom, web-based auto-battler designed to live inside Discord via the Embedde
 ## 🌟 Features
 
 * **2.5D battlefield.** 5×7 grid per side rendered as projected trapeziums; cards stand upright as billboards with depth-based scaling. Bench is a flat 7-slot strip on the left, plus a red **SELL** drop zone beneath it.
-* **Vertical standing cards.** 50×80 frames with HP bar on top, portrait middle, stars + work icons in the bottom strip, synergy badge top-left and style icon bottom-left. Cost-tier coloured borders.
-* **Live synergy tracking.** Every style and work tag has activation thresholds, per-tier buff multipliers, and human-readable ability descriptions. The side panel shows tier (★ / ★★ / ★★★), current count, and what the next threshold unlocks.
-* **3-star merge.** Owning 3 of the same character at the same star tier auto-merges into one unit a star higher. Cascades — 9× 1★ → 1× 3★ from a single buy. Stats scale 1.8× per star.
+* **Standing portrait cards.** 50×80 cards where the character portrait fills the entire card. HP + mana bars **float above** the card so the face is never covered. Stars row, work icons, style icon, and active-synergy badge overlay along the bottom edge of the portrait. Cost-tier neon border draws on top so it can't be obscured.
+* **Live synergy tracking with hover-reveal.** Every style and work tag has activation thresholds, per-tier buff multipliers, and human-readable ability descriptions. The side panel shows compact rows at idle (icon + name + tier + count); the ability description is hidden behind a `:hover` reveal to keep the panel scannable.
+* **Colored synergy chips.** Each synergy renders in a chip tinted by its `STYLE_CSS` / `WORK_CSS` color (`<img>` PNG → emoji fallback on 404). Drop PNGs into `client/assets/synergies/{styles|works}/` to replace emoji at will.
+* **3-star merge + shop pool.** Owning 3 of the same character at the same star tier auto-merges into one unit a star higher (cascades — 9× 1★ → 1× 3★ from a single buy). Once a unit hits 3★, it drops out of the shop pool entirely and gets evicted from any currently-displayed shop slots showing duplicates. Stats scale 1.8× per star.
 * **Sell zone.** Drag any unit onto the red SELL panel for a 1×/3×/9× cost refund by star tier.
-* **Per-unit mana + abilities + attack speed.** Every character has an ability. A cyan mana bar between the HP track and the portrait fills +1 per basic attack. Each unit also has its **own attack cooldown** driven by its style's `attackSpeed` — Hard Hitters swing roughly 1.5× as fast as Survivalists, so they cast more often per second naturally. At full mana the matching handler fires (chain lightning, cleave, AOE blast, heal aura, team rally, shield, slow). All damage/healing scales by the caster's scaled `abilityPower`, so 1g abilities chip while 5g abilities swing rounds.
-* **Gold economy.** Round income + interest + win/loss streak bonuses + paid rerolls + XP purchasing + Trader synergy bonus + Recruiter free rerolls.
+* **Per-unit mana + abilities + attack speed.** Every character has an ability. A cyan mana bar (floating above the card with HP) fills +1 per basic attack. Each unit has its **own attack cooldown** driven by its style's `attackSpeed` — Hard Hitters swing ~1.5× as fast as Survivalists. Combat ticks every **250ms** and each unit attacks only when its cooldown elapses. At full mana the matching handler fires (chain lightning, cleave, AOE blast, heal aura, team rally, shield, slow). All damage/healing scales by the caster's scaled `abilityPower`, so 1g abilities chip while 5g abilities swing rounds.
+* **Gold economy.** Round income + interest + win/loss streak bonuses + **+2g flat win bonus** + paid rerolls + XP purchasing + Trader synergy income bonus + Recruiter free rerolls + Researcher XP discount.
 * **Resurrection.** Dead player units come back to full HP at round end. Round loss damage scales with surviving enemies' stars, cost, and HP percentage.
 * **Hover info zone.** Hover any of your cards (board or bench) and the footer info zone shows name, cost, star tier, full scaled stats, and ability cadence.
-* **Snapshot-relay multiplayer.** Node + Socket.io server matches two players into a room and shuttles board snapshots when both click FIGHT. Falls back to single-player random enemies when no server is available.
+* **Snapshot-relay multiplayer.** Node + Socket.io server matches two players into a room and shuttles board snapshots when both click FIGHT. Opponent's HP, synergies, and roster mirror on the right side panel in real time. Falls back to single-player random enemies when no server is available.
 
 ## 🛠️ Tech Stack
 
@@ -34,7 +35,7 @@ discord-synergy-game/
 │   ├── net.js                  # socket.io-client wrapper (Net.init/send/on/connected/matched/slot)
 │   └── assets/
 │       ├── manifest.json       # charId → portrait path registry
-│       ├── portraits/          # Drop 96×96 PNGs here, named after the charId from dictionary.js
+│       ├── portraits/          # Drop 200×320 PNGs (5:8) here, named after the charId from dictionary.js
 │       └── synergies/
 │           ├── styles/         # Drop synergy icon PNGs here, named after style (e.g. Hard_Hitter.png)
 │           └── works/          # Drop synergy icon PNGs here, named after work (e.g. OutdoorPerson.png)
@@ -46,6 +47,9 @@ discord-synergy-game/
 │   ├── index.js                # Express + socket.io entrypoint, matchmaking + relay
 │   ├── gameRoom.js             # GameRoom class — 2 slots, snapshot staging
 │   └── gameLogic.js            # Standalone synergy calculator (test helper)
+├── raw_character_designs/      # Drop full-resolution source art here (any JPG/JFIF/PNG/WebP). pwsh tools/convert_portraits.ps1 converts the lot.
+├── tools/
+│   └── convert_portraits.ps1   # Top-aligned 5:8 crop + 200×320 high-quality bicubic resize → client/assets/portraits/
 ├── Game.png                    # Visual reference mockup
 ├── Synergy.png                 # Style × Work character roster chart
 └── README.md
@@ -78,7 +82,7 @@ discord-synergy-game/
 4. **Merge.** Own 3 copies of the same character at the same star → auto-merge into one star-up version with 1.8× stats. Cascades.
 5. **Sell.** Drag any unit onto the red **SELL** zone for a refund (1×/3×/9× cost for 1★/2★/3★).
 6. **Synergies.** Style and work synergies activate at thresholds (mostly 2 and 4; Mentor and Recruiter have an extra step at 3). The side panel shows current counts, tier stars, and ability descriptions.
-7. **Action phase.** Click **⚔️ FIGHT!**. Enemies spawn on the red grid (random in single-player, your opponent's board in multiplayer). Combat ticks every 1.5s — units pick nearest target, fire, deal damage. Star-scaled stats and synergy multipliers apply.
+7. **Action phase.** Click **⚔️ FIGHT!**. Enemies spawn on the red grid (random in single-player, your opponent's board in multiplayer). Combat ticks every **250ms** but each unit only swings when its personal `attackCooldown` (1500 / `attackSpeed`) has elapsed. Mana fills +1 per swing; at `chargeMax` the unit's ability fires. Star-scaled stats and synergy multipliers apply.
 8. **Round end.** Survivors heal; dead player units come back next round. Income arrives, shop refreshes, Trader/Recruiter synergy bonuses apply, you start planning again.
 
 ### Economy
@@ -196,7 +200,7 @@ net.js / server/
 
 Every character declares `ability: { id, chargeMax }` in `dictionary.js`. The `ABILITIES` registry in `game.js` maps id → `{ name, execute(scene, caster, allies, enemies) }`. After each basic attack the caster's `abilityCharge` grows by `STYLE_ATTACK_SPEED[style]`; at `chargeMax` the matching handler fires (then resets). Every ability uses `casterAP(caster)` to scale its damage/heal by the unit's scaled `abilityPower`, so power tracks both cost tier and star tier without per-character math.
 
-The mana bar on each card is `abilityCharge / chargeMax` — cyan rectangle between the HP bar and the portrait. Resets to 0 at round end.
+The mana bar on each card is `abilityCharge / chargeMax` — a cyan rectangle floating above the card next to the HP bar (so they don't cover the portrait face). Resets to 0 at round end.
 
 All ability damage routes through `applyDamage()` so player deaths hide-and-resurrect and enemy deaths destroy. To swap art for an ability, rewrite its `execute()` body — the trigger pipeline doesn't change. To rebalance pacing, tune `chargeMax` (in `dictionary.js`) and/or `STYLE_ATTACK_SPEED`.
 
@@ -219,17 +223,19 @@ Ability registry: `single_strike` (1g burst) · `cleave` (2-target sweep) · `ch
 - [x] Grid cells rendered as projected trapeziums with neon glow + pulse
 - [x] Pointer-projection patch — kept then retired once standing-card mode arrived (canvas is now flat so Phaser's default pointer math is correct again)
 
-### ✅ Phase 2 — Graphics & Standing Cards (DONE, ART PENDING)
+### ✅ Phase 2 — Graphics & Standing Cards (DONE, ART INFLOWING)
 - [x] 5×7 grid per side, canvas 1000×600
-- [x] Standing vertical 50×80 card visual (HP top, portrait middle, stars + work icons bottom, style icon corner, synergy badge corner)
-- [x] Manifest-driven portrait loader with `loaderror` fallback to rectangle placeholder
-- [x] Cost-tier frame colours (grey/green/blue/purple/gold for 1g–5g, dim red on enemies)
-- [x] Star row + synergy active badge
-- [x] **Art delivery:** drop 96×96 PNGs named after charIds (e.g. `Star_Vader.png`, `JNRanger.png`) into `client/assets/portraits/`. Auto-loaded on next refresh — no code change.
+- [x] Standing vertical 50×80 cards. Portrait fills the whole card; HP + mana bars **float above** the card top so the face stays unobstructed. Stars row + style icon + work icons + synergy active badge overlay along the bottom.
+- [x] Card visual split into `buildCardBg` (halo + dark fill, behind portrait) and `buildCardBorder` (sharp cost-tier outline, on top) so the border can't be obscured by the portrait at the rounded corners.
+- [x] Manifest-driven portrait loader with `loaderror` fallback to a style-colored rectangle + short-name placeholder.
+- [x] Cost-tier frame colours (grey/green/blue/purple/gold for 1g–5g, dim red on enemies).
+- [x] **Art pipeline.** Drop full-res source art (JFIF/JPG/PNG/WebP) at any aspect into `raw_character_designs/`, then `pwsh tools/convert_portraits.ps1`. The script top-crops to 5:8 and resamples with HighQualityBicubic to **200×320** in `client/assets/portraits/`. Dimensions chosen so Phaser only does a ~4× downsample at draw time — higher source resolutions (500+) get mushy from heavy bilinear compression at the card's tiny in-game size.
+- [x] **Cyberpunk character prompt** for generative tools — bold low-detail thumbnail-readable art, varied outfits per work, cyan rim light, cost-tier back-glow. See "Adding portrait art" in Notes for Contributors below.
 
 ### ✅ Phase 3 — Power Scaling, Synergies & Abilities (DONE)
 - [x] 5g Legendary tier — **JNRanger** (Strategist · Coder + Leader, fastest cast meter in the game)
 - [x] 3-Star merge with cascade
+- [x] **3★ shop exclusion** — `GameState.getMaxedCharIds()` returns charIds at 3★; `rollShop()` skips them from the cost buckets. Mid-planning, any matching currently-displayed shop slot is also evicted so the player can't buy a useless duplicate.
 - [x] Sell zone with 1×/3×/9× refund
 - [x] Per-unit ability scaffolding (chain_zap / aoe_blast / heal_aura placeholders; star-scaled)
 - [x] `GameState.benchSet(slot, unit)` — direct bench mutations migrated to the event-emitting helper
@@ -238,6 +244,7 @@ Ability registry: `single_strike` (1g burst) · `cleave` (2-target sweep) · `ch
 - [x] Leader as global team buff (atk + armor whole team)
 - [x] Trader synergy → +2/+5 gold per round
 - [x] Recruiter synergy → 1/2/3 free rerolls per round
+- [x] Researcher synergy → −1g / −2g XP cost discount + "Next Lvl: Ng" projected total on the Buy XP button
 - [x] Resurrection: player units come back at round end
 - [x] Loss damage scales with enemy survivors' stars/cost/HP
 - [x] Hover info zone in the footer
@@ -254,7 +261,7 @@ Ability registry: `single_strike` (1g burst) · `cleave` (2-target sweep) · `ch
 
 ### ✅ Phase 5 — Mana Update (DONE)
 - [x] **Every character has an ability** (1g → weak, 4g → strong, 5g → strongest). 8 ability ids cover the roster: `single_strike`, `cleave`, `chain_zap`, `aoe_blast`, `heal_aura`, `team_buff`, `shield_ally`, `slow_enemy`. All damage/healing scales by the caster's scaled `abilityPower`, so power tracks cost AND star tier automatically.
-- [x] **Mana bar** on every card — cyan rectangle between the HP bar (top) and the portrait (middle). Width = `abilityCharge / ability.chargeMax`. Resets to 0 at round end.
+- [x] **Mana bar** on every card — cyan rectangle floating above the card next to the HP bar (so neither covers the portrait face). Width = `abilityCharge / ability.chargeMax`. Resets to 0 at round end.
 - [x] **Per-unit attack cooldown.** Combat now ticks every **250ms** (was 1500ms). Each unit carries an `attackCooldown` that decrements every tick; it only swings when the cooldown elapses, then resets to `BASE_ATTACK_INTERVAL_MS / unitAttackSpeed(unit)`. So a Hard Hitter (1.30) swings every ~1154ms while a Survivalist (0.85) swings every ~1765ms — same loop, real speed differentiation.
 - [x] **Mana fills +1 per attack** (was += attackSpeed). The speed advantage is already in attack RATE — making mana also gain by attackSpeed double-counted.
 - [x] **`chargeMax` by cost tier:** 1g = 5, 2g = 4, 3g = 4, 4g = 3, 5g = 2. Combined with the cooldown system this gives a wide spread of cast cadences in seconds.
@@ -290,5 +297,10 @@ Ability registry: `single_strike` (1g burst) · `cleave` (2-target sweep) · `ch
 * **Adding a character.** Drop an entry into `CHARACTERS` in `dictionary.js` and add the matching `"<CharId>": { "portrait": "portraits/<CharId>.png" }` to `client/assets/manifest.json`. The PNG name must match the dictionary key exactly. The shop, synergy panel, hover info, drag-and-drop, merge, and ability systems pick it up with no code change.
 * **Adding an ability.** Register `myAbility: { name, execute(scene, caster, allies, enemies) {…} }` in the `ABILITIES` object in `game.js`. Damage should go through `applyDamage(target, dmg)` so player deaths hide-and-resurrect and enemies destroy. Bind to a character with `ability: { id: "myAbility", chargeMax: N }` in its dictionary entry.
 * **Adding a synergy.** Add to `SYNERGIES.styles` or `SYNERGIES.works` in `dictionary.js` with `thresholds: [...]`, `buffs: [...]` (one per threshold; multiplier keys `hp`/`atk`/`armor`/`ap`), and `tierDesc: [...]`. Mark `global: true` to apply the buff to every unit regardless of tag (like Leader). Mark `economy: [...]` if the effect should fire on round transition rather than in combat — and add a handler in `applyRoundStartSynergyEconomy()`.
-* **Adding portrait art.** Recommended generation prompt is in the chat history — square 1:1, upper body 3/4 view, chibi-style, cel-shaded with neon cyan rim light, transparent PNG, 512×512 (we downsample). File names must match charIds case-sensitively.
+* **Adding portrait art.**
+   1. **Generate** the source image with your tool of choice. Prompt highlights: vertical 5:8 portrait, **bold low-detail cel-shaded style** designed to read at 50×80 thumbnail (no rivets / fine text / micro-patterns); cyberpunk world unifiers (one LED seam + one chrome accent + one floating holo glyph) in the unit's cost-tier color; outfit silhouette dictated by **work** (silks for Trader, robes for Mentor, hoodie for Coder, etc.) so the set stays varied — don't default to leather; preserve face / hair / signature element from reference image; transparent background; cyan rim light from upper right.
+   2. **Drop the file** into `raw_character_designs/` named `<CharId>.<ext>` matching the dictionary key exactly (case + underscores: `Wkd_w0lf.jpg`, `Star_Vader.png`, `JNRanger.webp`). Any size, any common format works.
+   3. **Run** `pwsh tools/convert_portraits.ps1` from the repo root. The script top-crops to 5:8 (drops feet, preserves head + chest), resamples to **200×320** with HighQualityBicubic, and writes a PNG into `client/assets/portraits/`. 200×320 is the deliberate target so Phaser only does a ~4× downsample to the 50×80 card — HD sources turn to mush at the in-game size.
+   4. **Refresh** the game. The manifest already lists every charId, so the new portrait auto-loads. Fallback rectangle disappears for that character.
+   - To add an entirely **new** character: extend `CHARACTERS` in `dictionary.js`, then `"<CharId>": { "portrait": "portraits/<CharId>.png" }` in `client/assets/manifest.json`, then drop art via the steps above.
 * **Client-authoritative multiplayer.** Each client runs its own combat sim against the opponent's snapshot. Results can diverge if RNG seeds differ (currently no shared seed — combat is deterministic in practice because random targeting only fires on ties, but ability charge timing could drift). For ranked play, port `combatTick` into `server/gameLogic.js` and broadcast per-tick state instead.
